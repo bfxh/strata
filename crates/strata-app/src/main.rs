@@ -1,21 +1,22 @@
-//! 应用壳（组装层，不放逻辑，见 03）。M1c：wgpu 地形经 paint callback 进中央视口，
-//! 鼠标拖拽轨道旋转、滚轮缩放、WASD 平移。磨砂玻璃与节点图在 M3 落地。
+//! 应用壳（组装层，不放逻辑，见 03）。M1d：10 层 clipmap 流式地形进中央视口；
+//! WASD 以世界 i64 毫米位移漫游（锚点量化保证渲染局部 float 有界），拖拽轨道、滚轮推拉。
 
 use std::sync::{Arc, Mutex};
 
 use eframe::egui;
 
+use strata_app::clipmap_state::{Cam3, ClipmapState, SceneParams};
 use strata_exec::{DepRadius, Edge, Graph, NodeId};
 use strata_geo::DEFAULT_TILE_SPAN_PX;
 use strata_gpu::math::Mat4;
 use strata_gpu::renderer::TerrainGpu;
 use strata_nodes::region::NoiseNode;
 use strata_nodes::Fill;
+use strata_render::clipmap::total_texture_bytes;
 use strata_render::clipmap_layer_count;
 use strata_render::mesh::TerrainMesh;
 
-const HEIGHT_DIM: u32 = 512; // 单层 512² 高度纹理（M1a 的 CPU 生成核喂入）
-const MESH_N: u32 = 256; // 256² 顶点网格
+const MESH_N: u32 = 64; // 与 clipmap res 对齐的正则网格
 
 fn main() -> eframe::Result<()> {
     let args: Vec<String> = std::env::args().collect();
@@ -52,7 +53,7 @@ fn main() -> eframe::Result<()> {
     )
 }
 
-/// 演示用的最小图：一个 fill 节点。M3 起换成真实 DAG。
+/// 演示用的最小图（M3 起由真实 DAG 替换）。
 fn seed_graph() -> Graph {
     let mut g = Graph::default();
     g.add_node(NodeId(0));
@@ -72,26 +73,6 @@ struct ViewState {
     gpu: Mutex<TerrainGpu>,
 }
 
-/// 相机：绕 target 的球面轨道（RTE 语义下全部是局部量，无世界大数）。
-#[derive(Clone, Copy)]
-struct Camera {
-    yaw: f32,
-    pitch: f32,
-    dist: f32,
-    target: [f32; 3],
-}
-
-impl Camera {
-    fn eye(&self) -> [f32; 3] {
-        let cp = self.pitch.cos();
-        [
-            self.target[0] + self.yaw.sin() * cp * self.dist,
-            self.target[1] + self.pitch.sin() * self.dist,
-            self.target[2] + self.yaw.cos() * cp * self.dist,
-        ]
-    }
-}
-
 /// paint callback：把离屏地形纹理贴到本回调的视口矩形。
 struct TerrainCallback {
     shared: Arc<ViewState>,
@@ -109,11 +90,9 @@ impl egui_wgpu::CallbackTrait for TerrainCallback {
         let y = vp.top_px.max(0) as u32;
         let w = vp.width_px.max(0) as u32;
         let h = (vp.from_bottom_px - vp.top_px).max(0) as u32;
-        let guard = match self.shared.gpu.lock() {
-            Ok(g) => g,
-            Err(_) => return,
-        };
-        guard.paint(rpass, x, y, w, h);
+        if let Ok(guard) = self.shared.gpu.lock() {
+            guard.paint(rpass, x, y, w, h);
+        }
     }
 }
 
@@ -123,71 +102,48 @@ struct StrataApp {
     view_range_mm: i64,
     view: Option<Arc<ViewState>>,
     view_error: Option<String>,
-    cam: Camera,
     mesh_verts: Vec<[f32; 3]>,
     mesh_idx: Vec<u32>,
-    heights: Vec<f32>,
+    clip: ClipmapState,
+    cam: Cam3,
+    /// 世界眼位（i64 毫米）——漫游只动它，渲染永远用相对量
+    eye_x_mm: i64,
+    eye_y_mm: i64,
 }
 
 impl StrataApp {
     fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let mesh = TerrainMesh::new(MESH_N, 0.02);
-        let node = NoiseNode {
-            seed: 0x57_0000_0000_0001,
-            wavelength_mm: 64,
-            octaves: 5,
-            warp: Some(strata_nodes::noise::Warp {
-                amplitude_mm: 48,
-                wavelength_mm: 256,
-            }),
-        };
-        let tile = strata_nodes::CpuNode::eval_height(
-            &node,
-            strata_geo::TilePos {
-                x: 0,
-                y: 0,
-                level: 0,
-            },
-            HEIGHT_DIM,
-            0,
-            DEFAULT_TILE_SPAN_PX,
-        );
-        let heights = tile.data;
-
+        let params = SceneParams::default();
+        let clip = strata_app::clipmap_state::demo_scene();
+        let (eye_x, eye_y) = clip.eye_mm();
         let mut app = Self {
             graph: seed_graph(),
             fill_value: 0.25,
             view_range_mm: 100_000,
             view: None,
             view_error: None,
-            cam: Camera {
-                yaw: 0.6,
-                pitch: 0.5,
-                dist: 2.4,
-                target: [0.0, 0.0, 0.0],
-            },
             mesh_verts: mesh.vertices(),
             mesh_idx: mesh.indices(),
-            heights,
+            clip,
+            cam: Cam3 {
+                yaw: 0.6,
+                pitch: 0.45,
+                dist_m: 900.0,
+            },
+            eye_x_mm: eye_x,
+            eye_y_mm: eye_y,
         };
         if let Some(rs) = cc.wgpu_render_state.as_ref() {
-            let gpu = TerrainGpu::new(&rs.device, rs.target_format);
+            let mut gpu = TerrainGpu::new(&rs.device, rs.target_format);
+            gpu.set_mesh(&rs.device, &rs.queue, &app.mesh_verts, &app.mesh_idx);
+            gpu.configure_layers(&rs.device, params.layers as usize, params.res);
+            gpu.resize(&rs.device, 1024, 768);
             let shared = Arc::new(ViewState {
                 device: rs.device.clone(),
                 queue: rs.queue.clone(),
                 gpu: Mutex::new(gpu),
             });
-            {
-                let mut g = shared.gpu.lock().unwrap();
-                g.set_mesh(
-                    &shared.device,
-                    &shared.queue,
-                    &app.mesh_verts,
-                    &app.mesh_idx,
-                );
-                g.set_height(&shared.device, &shared.queue, &app.heights, HEIGHT_DIM);
-                g.resize(&shared.device, 1024, 768);
-            }
             app.view = Some(shared);
         } else {
             app.view_error = Some("egui 未启用 wgpu 渲染后端".to_string());
@@ -195,6 +151,7 @@ impl StrataApp {
         app
     }
 
+    /// 世界漫游：方向由 yaw 定，步长直接加在世界 i64 毫米上（精确）。
     fn handle_input(&mut self, ui: &egui::Ui, resp: &egui::Response) {
         let (a, d, up, down, scroll) = ui.input(|i| {
             (
@@ -205,52 +162,60 @@ impl StrataApp {
                 i.raw_scroll_delta.y,
             )
         });
-        // 拖拽旋转：egui 自己维护 delta（dragged_by），不借 memory 存上一帧
         if resp.dragged_by(egui::PointerButton::Primary) {
-            let d = resp.drag_delta();
-            self.cam.yaw -= d.x * 0.005;
-            self.cam.pitch = (self.cam.pitch + d.y * 0.005).clamp(0.05, 1.45);
+            let dd = resp.drag_delta();
+            self.cam.yaw -= dd.x * 0.005;
+            self.cam.pitch = (self.cam.pitch + dd.y * 0.005).clamp(-0.2, 1.45);
             ui.ctx().request_repaint();
         }
-        let speed = 0.08;
-        if a {
-            self.cam.target[0] -= speed;
-        }
-        if d {
-            self.cam.target[0] += speed;
-        }
-        if up {
-            self.cam.target[2] -= speed;
-        }
-        if down {
-            self.cam.target[2] += speed;
-        }
-        if a || d || up || down {
+        let speed_mm: f32 = 6_000.0; // 6m/帧
+        let (sy, cy) = (self.cam.yaw.sin(), self.cam.yaw.cos());
+        if up || down || a || d {
+            if up {
+                self.eye_x_mm += (sy * speed_mm) as i64;
+                self.eye_y_mm += (cy * speed_mm) as i64;
+            }
+            if down {
+                self.eye_x_mm -= (sy * speed_mm) as i64;
+                self.eye_y_mm -= (cy * speed_mm) as i64;
+            }
+            if a {
+                self.eye_x_mm -= (cy * speed_mm) as i64;
+                self.eye_y_mm += (sy * speed_mm) as i64;
+            }
+            if d {
+                self.eye_x_mm += (cy * speed_mm) as i64;
+                self.eye_y_mm -= (sy * speed_mm) as i64;
+            }
             ui.ctx().request_repaint();
         }
         if scroll.abs() > 0.1 {
-            self.cam.dist = (self.cam.dist * (1.0 - scroll * 0.001)).clamp(0.4, 20.0);
+            self.cam.dist_m = (self.cam.dist_m * (1.0 - scroll * 0.001)).clamp(20.0, 200_000.0);
             ui.ctx().request_repaint();
         }
     }
 
-    fn render_frame(&self, w_px: u32, h_px: u32, aspect: f32) {
+    /// 一帧：流式增量 → 层参数 → GPU。
+    fn render_frame(&mut self, w_px: u32, h_px: u32, aspect: f32) {
         let Some(shared) = &self.view else { return };
+        self.clip.move_eye(self.eye_x_mm, self.eye_y_mm);
+        let uploads = self.clip.take_uploads();
         {
             let g = shared.gpu.lock().unwrap();
             g.resize(&shared.device, w_px, h_px);
+            for (idx, data) in &uploads {
+                g.upload_layer(&shared.queue, *idx, data);
+            }
         }
-        let eye = self.cam.eye();
-        let vp = Mat4::perspective_rh(std::f32::consts::FRAC_PI_4, aspect.max(0.01), 0.05, 50.0)
-            .mul(&Mat4::look_at_rh(eye, self.cam.target, [0.0, 1.0, 0.0]));
-        let ok = shared
+        let eye = self.cam.eye_m();
+        let vp = Mat4::perspective_rh(std::f32::consts::FRAC_PI_4, aspect.max(0.01), 0.5, 90_000.0)
+            .mul(&Mat4::look_at_rh(eye, [0.0, 0.0, 0.0], [0.0, 1.0, 0.0]));
+        let frames = self.clip.layer_frames(vp.0);
+        let _ = shared
             .gpu
             .lock()
             .unwrap()
-            .draw_terrain(&shared.device, &shared.queue, vp.0, 0.45);
-        if !ok {
-            // 资源缺失（如无 GPU）：视口保持上一次内容，M2 起在 UI 上显式提示
-        }
+            .draw_layers(&shared.device, &shared.queue, &frames);
     }
 }
 
@@ -262,7 +227,11 @@ impl eframe::App for StrataApp {
                 ui.separator();
                 ui.label(format!("nodes: {}", self.graph.node_count()));
                 if self.view.is_some() {
-                    ui.label("视口: GPU 地形");
+                    ui.label(format!(
+                        "clipmap {} 层 | 显存 {} KB",
+                        self.clip.specs().len(),
+                        total_texture_bytes(self.clip.specs()) / 1024
+                    ));
                 } else if let Some(err) = &self.view_error {
                     ui.colored_label(egui::Color32::YELLOW, format!("视口降级: {err}"));
                 }
@@ -281,8 +250,16 @@ impl eframe::App for StrataApp {
                 "视距 {}mm → clipmap {} 层",
                 self.view_range_mm, layers
             ));
+            ui.label(format!(
+                "世界眼位 ({}mm, {}mm)",
+                self.eye_x_mm, self.eye_y_mm
+            ));
+            ui.label(format!(
+                "增量重生成 {} 次 / 重传 {} 层次",
+                self.clip.regen_count, self.clip.upload_count
+            ));
             ui.separator();
-            ui.label("相机: 拖拽旋转 / WASD 平移 / 滚轮缩放");
+            ui.label("漫游: WASD | 旋转: 左键拖拽 | 推拉: 滚轮");
         });
 
         egui::CentralPanel::default().show(ctx, |ui| {
@@ -301,9 +278,7 @@ impl eframe::App for StrataApp {
                     },
                 ));
             } else {
-                ui.centered_and_justified(|ui| {
-                    ui.heading("视口（无 GPU 或渲染面未就绪）");
-                });
+                ui.centered_and_justified(|ui| ui.heading("视口（无 GPU 或渲染面未就绪）"));
             }
         });
     }

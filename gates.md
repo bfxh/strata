@@ -11,7 +11,8 @@
 | B1 test + 覆盖率下限 | ✅ test 已建 / ⏳ 覆盖率阈值待 gate.toml 生效 | `xtask gate` + tarpaulin | 删边界测试使 <90%/70% ⇒ 红（阈值脚本化后）|
 | B3 确定性（CPU 侧先行）| 🟡 半建：同 seed 双跑逐位相等 + 量化金标准 `[0,1130,80,1339,2642,3825,2969,4017]`（strata-nodes::region）；跨平台面 M4 接 | `cargo test` | 扰动 noise 核一个常数 ⇒ 金标准红；GPU 侧待 B2 |
 | B2 CPU/GPU parity | ⏳ M1-GPU 建 | 待定 | 改 WGSL 一个常数必红 —— 依赖 strata-gpu 落地 |
-| C1 golden image | 🟡 半建：本机 Vulkan/RTX4060Ti 真渲染 128²，三判决面（非空图/双跑复现/冻结哈希 17092285482363414448）；无 adapter 机器 SKIP 并披露 | `cargo test -p strata-app --test c1_golden` | 改 WGSL/拓扑必红（本轮建成时即真判红 3 次）；跨平台基线分文件登记待接入 |
+| C1 golden image | ✅ 建成（本机口径）：两张冻结哈希——C1#1 单层 legacy `17092285482363414448`、C1#2 十层 clipmap 场景 `3779239380702403447`；各跑双次自复现 + 非空图；无 adapter 机器 SKIP 并披露 | `cargo test -p strata-app --test c1_golden` | 改 WGSL/mesh/层参数必红；跨平台基线分文件登记待接入 |
+| P3 漫游增量 | ✅ 建成：37 帧斜线漫游重生成次数 ∈ (0, 37×层) —— 既非全图重烤也非从不更新 | `roam_regen_is_incremental_not_full_rebake` | 把 move_eye 改成全 dirty ⇒ delta 触上限红；改成不动 ⇒ delta=0 红 |
 
 > M1c 视口冒烟（非门，属人工验收）：strata.exe 渲染循环存活 8s 无 panic（eframe wgpu 面 + paint callback + terrain/sprite 双管线多帧执行）。**像素观感本代理会话无法人工确认，需用户 `cargo run -p strata-app` 目测**；拖拽/WASD/滚轮的交互手感同为待用户验证项。
 | C2 UI 对比度 | ⏳ M3 建 | 待定 | 调低 glass tint 必红 |
@@ -21,7 +22,7 @@
 | F1 三平台矩阵 | ✅ CI 已接（build/test 级）| workflow | 任一平台红 |
 | G1 文档门（P1–P8 有归属）| ⏳ 脚本化待定 | 待定 | 新承重算法无 02 出处 ⇒ 红 |
 
-已建门数 **6/14**（C1 半建计入），B2（CPU/GPU parity）仍是 ⏳——现 shader 采的是 CPU 生成的纹理，GPU 噪声核未落地，不能算 parity 已建。判定类硬门随后续里程碑逐个建，每个建时必须同批登记负对照，否则不计入。
+已建门数 **7/14**（C1 双哈希 + 漫游增量入列），B2（CPU/GPU parity）仍是 ⏳——现 shader 采的是 CPU 生成的多层高度纹理，GPU 独立算噪声的成对实现未落地，不能算 parity 已建。判定类硬门随后续里程碑逐个建，每个建时必须同批登记负对照，否则不计入。
 
 ## 承重设计已挡住的问题（对照 01，G1 门的雏形）
 - P1 → TileCache 字节预算 + LRU（strata-field，本轮 3 个测试锁行为）

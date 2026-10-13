@@ -6,6 +6,10 @@ struct Uniforms {
     view_proj: mat4x4<f32>,
     height_scale: f32,
     tex_dim: f32,
+    half_span: f32,
+    skirt_scale: f32,
+    offset_x: f32,
+    offset_z: f32,
     _pad0: f32,
     _pad1: f32,
 };
@@ -35,8 +39,11 @@ fn vs_main(in: VsIn) -> VsOut {
     let uv = in.xz * 0.5 + vec2(0.5);
     let dim = i32(u.tex_dim);
     let h = textureLoad(height_tex, texel(dim, uv), 0).r;
-    let y = h * u.height_scale - in.drop;
-    o.clip = u.view_proj * vec4<f32>(in.xz.x, y, in.xz.y, 1.0);
+    // 世界局部坐标（相对 eye，米）：网格 [-1,1] × half_span + 层偏移
+    let wx = in.xz.x * u.half_span + u.offset_x;
+    let wz = in.xz.y * u.half_span + u.offset_z;
+    let y = h * u.height_scale - in.drop * u.skirt_scale;
+    o.clip = u.view_proj * vec4<f32>(wx, y, wz, 1.0);
     o.uv = uv;
     o.h = h;
     return o;

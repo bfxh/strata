@@ -12,13 +12,18 @@ use std::sync::{Arc, Mutex};
 
 const SHADER: &str = include_str!("../shaders/terrain.wgsl");
 
-/// 与 WGSL `Uniforms` 逐字节对齐：mat4(64) + height_scale + tex_dim + pad(8) = 80。
+/// 与 WGSL `Uniforms` 逐字节对齐：mat4(64) + 8×f32(32) = 96。
+/// 单层 legacy 路径用 half_span=1/offset=0/skirt_scale=1 ⇒ 像素与 C1#1 基线一致。
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 struct Uniforms {
     view_proj: [f32; 16],
     height_scale: f32,
     tex_dim: f32,
+    half_span: f32,
+    skirt_scale: f32,
+    offset_x: f32,
+    offset_z: f32,
     _pad: [f32; 2],
 }
 
@@ -33,6 +38,38 @@ struct Target {
     h: u32,
 }
 
+/// 一层的高度 GPU 资源：纹理 + 专属 ubuf + 专属 bind group（每帧只改 uniform 内容）。
+pub struct LayerGpu {
+    tex: wgpu::Texture,
+    bg: wgpu::BindGroup,
+    ubuf: wgpu::Buffer,
+    dim: u32,
+}
+
+/// 一层的每帧绘制参数（全部 eye-relative，米）。
+#[derive(Clone, Copy, Debug)]
+pub struct LayerFrame {
+    pub view_proj: [f32; 16],
+    pub height_scale_m: f32,
+    pub half_span_m: f32,
+    pub skirt_scale_m: f32,
+    /// 层网格中心相对 eye 的偏移（米）——clipmap 锚点量化保证它 ≤ span
+    pub offset_m: [f32; 2],
+}
+
+impl LayerFrame {
+    /// 单层 legacy 场景（C1#1 基线口径：单位网格，无偏移）。
+    pub fn legacy(view_proj: [f32; 16], height_scale: f32) -> Self {
+        Self {
+            view_proj,
+            height_scale_m: height_scale,
+            half_span_m: 1.0,
+            skirt_scale_m: 1.0,
+            offset_m: [0.0, 0.0],
+        }
+    }
+}
+
 /// 地形渲染管线组（terrain → 自持离屏纹理；sprite → 显示面格式）。
 pub struct TerrainGpu {
     terrain_pipeline: wgpu::RenderPipeline,
@@ -40,8 +77,7 @@ pub struct TerrainGpu {
     material_bgl: wgpu::BindGroupLayout,
     sprite_bgl: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
-    ubuf: wgpu::Buffer,
-    height: Option<(wgpu::Texture, wgpu::BindGroup, u32)>,
+    layers: Vec<LayerGpu>,
     mesh: Option<(wgpu::Buffer, wgpu::Buffer, u32)>,
     target: Mutex<Option<Target>>,
 }
@@ -209,20 +245,13 @@ impl TerrainGpu {
             min_filter: wgpu::FilterMode::Linear,
             ..Default::default()
         });
-        let ubuf = device.create_buffer(&wgpu::BufferDescriptor {
-            label: None,
-            size: std::mem::size_of::<Uniforms>() as u64,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
         Self {
             terrain_pipeline,
             sprite_pipeline,
             material_bgl,
             sprite_bgl,
             sampler,
-            ubuf,
-            height: None,
+            layers: Vec::new(),
             mesh: None,
             target: Mutex::new(None),
         }
@@ -250,59 +279,73 @@ impl TerrainGpu {
         self.mesh = Some((vb, ib, indices.len() as u32));
     }
 
-    /// 上传高度场（行主序 f32，dim×dim）并重建材质 bind group。
-    pub fn set_height(
-        &mut self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        data: &[f32],
-        dim: u32,
-    ) {
-        let tex = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("height"),
-            size: wgpu::Extent3d {
-                width: dim,
-                height: dim,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::R32Float,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
+    /// 建立/重置 `n` 层，每层 `dim×dim` 高度纹理 + 专属 ubuf + bind group。
+    /// 层数或 dim 变化时重建全部（clipmap 层数固定时通常只建一次）。
+    pub fn configure_layers(&mut self, device: &wgpu::Device, n: usize, dim: u32) {
+        if self.layers.len() == n && self.layers.first().map(|l| l.dim) == Some(dim) {
+            return;
+        }
+        self.layers = (0..n)
+            .map(|_| {
+                let tex = device.create_texture(&wgpu::TextureDescriptor {
+                    label: Some("height"),
+                    size: wgpu::Extent3d {
+                        width: dim,
+                        height: dim,
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: wgpu::TextureFormat::R32Float,
+                    usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                    view_formats: &[],
+                });
+                let ubuf = device.create_buffer(&wgpu::BufferDescriptor {
+                    label: None,
+                    size: std::mem::size_of::<Uniforms>() as u64,
+                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                });
+                let view = tex.create_view(&wgpu::TextureViewDescriptor::default());
+                let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("terrain_material_bg"),
+                    layout: &self.material_bgl,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: ubuf.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: wgpu::BindingResource::TextureView(&view),
+                        },
+                    ],
+                });
+                LayerGpu { tex, bg, ubuf, dim }
+            })
+            .collect();
+    }
+
+    /// 把某层高度数据（dim² f32，行主序）上传到其纹理。锚点未变的层可跳过（P3）。
+    pub fn upload_layer(&self, queue: &wgpu::Queue, idx: usize, data: &[f32]) {
+        let Some(l) = self.layers.get(idx) else {
+            return;
+        };
         queue.write_texture(
-            tex_info(&tex),
+            tex_info(&l.tex),
             bytemuck::cast_slice(data),
             wgpu::TexelCopyBufferLayout {
                 offset: 0,
-                bytes_per_row: Some(dim * 4),
-                rows_per_image: Some(dim),
+                bytes_per_row: Some(l.dim * 4),
+                rows_per_image: Some(l.dim),
             },
             wgpu::Extent3d {
-                width: dim,
-                height: dim,
+                width: l.dim,
+                height: l.dim,
                 depth_or_array_layers: 1,
             },
         );
-        let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("terrain_material_bg"),
-            layout: &self.material_bgl,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: self.ubuf.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::TextureView(
-                        &tex.create_view(&wgpu::TextureViewDescriptor::default()),
-                    ),
-                },
-            ],
-        });
-        self.height = Some((tex, bg, dim));
     }
 
     /// 调整离屏目标尺寸（与旧尺寸相同则不动）。
@@ -374,25 +417,35 @@ impl TerrainGpu {
         });
     }
 
-    /// 渲染地形到自持离屏纹理并提交。资源不齐 ⇒ 不动作（返回 false）。
-    pub fn draw_terrain(
+    /// 一个 pass 内逐层绘制（层序=frames 序，远层先画、近层覆盖中心区）。
+    /// 资源不齐 ⇒ 不动作（返回 false）。
+    pub fn draw_layers(
         &self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        view_proj: [f32; 16],
-        height_scale: f32,
+        frames: &[LayerFrame],
     ) -> bool {
-        let (dim, material_bg, count) = match (&self.height, &self.mesh) {
-            (Some((_, bg, dim)), Some((_, _, count))) => (*dim, bg.clone(), *count),
-            _ => return false,
+        if frames.is_empty() || self.layers.is_empty() {
+            return false;
+        }
+        let count = match self.mesh.as_ref() {
+            Some((_, _, c)) => *c,
+            None => return false,
         };
-        let uni = Uniforms {
-            view_proj,
-            height_scale,
-            tex_dim: dim as f32,
-            _pad: [0.0; 2],
-        };
-        queue.write_buffer(&self.ubuf, 0, bytemuck::bytes_of(&uni));
+        // 逐层写专属 ubuf（每帧只写 uniform 内容，不动纹理）
+        for (frame, layer) in frames.iter().zip(self.layers.iter()) {
+            let uni = Uniforms {
+                view_proj: frame.view_proj,
+                height_scale: frame.height_scale_m,
+                tex_dim: layer.dim as f32,
+                half_span: frame.half_span_m,
+                skirt_scale: frame.skirt_scale_m,
+                offset_x: frame.offset_m[0],
+                offset_z: frame.offset_m[1],
+                _pad: [0.0; 2],
+            };
+            queue.write_buffer(&layer.ubuf, 0, bytemuck::bytes_of(&uni));
+        }
         let tgt_guard = self.target.lock().unwrap();
         let Some(t) = tgt_guard.as_ref() else {
             return false;
@@ -428,10 +481,12 @@ impl TerrainGpu {
                 occlusion_query_set: None,
             });
             rp.set_pipeline(&self.terrain_pipeline);
-            rp.set_bind_group(0, &material_bg, &[]);
             rp.set_vertex_buffer(0, vb.slice(..));
             rp.set_index_buffer(ib.slice(..), wgpu::IndexFormat::Uint32);
-            rp.draw_indexed(0..count, 0, 0..1);
+            for layer in self.layers.iter() {
+                rp.set_bind_group(0, &layer.bg, &[]);
+                rp.draw_indexed(0..count, 0, 0..1);
+            }
         }
         queue.submit(std::iter::once(enc.finish()));
         true
@@ -486,7 +541,8 @@ pub struct OffscreenTerrain {
     gpu: Arc<Mutex<TerrainGpu>>,
 }
 
-fn request_offscreen_device() -> Option<(Arc<wgpu::Device>, Arc<wgpu::Queue>)> {
+/// 申请一个可离屏渲染的 device/queue（无 surface）。失败 ⇒ None。
+pub fn request_offscreen_device() -> Option<(Arc<wgpu::Device>, Arc<wgpu::Queue>)> {
     let instance = wgpu::Instance::default();
     let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
         power_preference: wgpu::PowerPreference::default(),
@@ -525,19 +581,20 @@ impl OffscreenTerrain {
         })
     }
 
-    /// 渲染并回读 RGBA8（size×size）。
+    /// 渲染并回读 RGBA8（size×size）。单层 legacy 参数 ⇒ 像素与 C1#1 基线口径一致。
     pub fn render(&self, f: &Frame<'_>) -> Option<Vec<u8>> {
         {
             let mut g = self.gpu.lock().unwrap();
             g.set_mesh(&self.device, &self.queue, f.verts, f.indices);
-            g.set_height(&self.device, &self.queue, f.height, f.tex_dim);
+            g.configure_layers(&self.device, 1, f.tex_dim);
+            g.upload_layer(&self.queue, 0, f.height);
             g.resize(&self.device, f.size, f.size);
         }
-        if !self.gpu.lock().unwrap().draw_terrain(
+        let frame = LayerFrame::legacy(f.view_proj, f.height_scale);
+        if !self.gpu.lock().unwrap().draw_layers(
             &self.device,
             &self.queue,
-            f.view_proj,
-            f.height_scale,
+            std::slice::from_ref(&frame),
         ) {
             return None;
         }
