@@ -60,3 +60,32 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let base = mix(lo, hi, k * k);
     return vec4<f32>(base * lam, 1.0);
 }
+
+// ---- sprite 通道：把离屏地形纹理贴进 egui 主 pass（viewport 限定矩形） ----
+
+struct SpriteOut {
+    @builtin(position) pos: vec4<f32>,
+    @location(0) uv: vec2<f32>,
+};
+
+@group(0) @binding(0) var disp_tex: texture_2d<f32>;
+@group(0) @binding(1) var disp_smp: sampler;
+
+@vertex
+fn vs_sprite(@builtin(vertex_index) vi: u32) -> SpriteOut {
+    // 覆盖视口的超大三角形：(-1,-1),(3,-1),(-1,3)。
+    // wgpu 帧缓冲 y 向下 ⇒ uv.y = (1 - ndc.y)/2，uv=(0,0) 对应纹理左上（行主序高度场）。
+    var x = -1.0;
+    var y = -1.0;
+    if (vi == 1u) { x = 3.0; }
+    if (vi == 2u) { y = 3.0; }
+    var o: SpriteOut;
+    o.pos = vec4<f32>(x, y, 0.0, 1.0);
+    o.uv = vec2<f32>(x, -y) * 0.5 + 0.5;
+    return o;
+}
+
+@fragment
+fn fs_sprite(in: SpriteOut) -> @location(0) vec4<f32> {
+    return textureSample(disp_tex, disp_smp, in.uv);
+}

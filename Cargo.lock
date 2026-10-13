@@ -2051,6 +2051,7 @@ name = "strata-app"
 version = "0.0.0"
 dependencies = [
  "eframe",
+ "egui-wgpu",
  "strata-exec",
  "strata-field",
  "strata-geo",
@@ -2058,6 +2059,7 @@ dependencies = [
  "strata-io",
  "strata-nodes",
  "strata-render",
+ "wgpu",
 ]
 
 [[package]]

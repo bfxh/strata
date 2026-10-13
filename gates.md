@@ -12,6 +12,8 @@
 | B3 确定性（CPU 侧先行）| 🟡 半建：同 seed 双跑逐位相等 + 量化金标准 `[0,1130,80,1339,2642,3825,2969,4017]`（strata-nodes::region）；跨平台面 M4 接 | `cargo test` | 扰动 noise 核一个常数 ⇒ 金标准红；GPU 侧待 B2 |
 | B2 CPU/GPU parity | ⏳ M1-GPU 建 | 待定 | 改 WGSL 一个常数必红 —— 依赖 strata-gpu 落地 |
 | C1 golden image | 🟡 半建：本机 Vulkan/RTX4060Ti 真渲染 128²，三判决面（非空图/双跑复现/冻结哈希 17092285482363414448）；无 adapter 机器 SKIP 并披露 | `cargo test -p strata-app --test c1_golden` | 改 WGSL/拓扑必红（本轮建成时即真判红 3 次）；跨平台基线分文件登记待接入 |
+
+> M1c 视口冒烟（非门，属人工验收）：strata.exe 渲染循环存活 8s 无 panic（eframe wgpu 面 + paint callback + terrain/sprite 双管线多帧执行）。**像素观感本代理会话无法人工确认，需用户 `cargo run -p strata-app` 目测**；拖拽/WASD/滚轮的交互手感同为待用户验证项。
 | C2 UI 对比度 | ⏳ M3 建 | 待定 | 调低 glass tint 必红 |
 | D1 性能回归 | ⏳ M1 建 | 待定 | 注入 O(n²) 退化 |
 | D2 内存预算 | ⏳ M1 建 | 待定 | 关 LRU 淘汰使 RSS 超 budget.toml |

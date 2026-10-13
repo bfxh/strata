@@ -13,6 +13,8 @@ strata-render = { path = "../strata-render" }
 strata-gpu = { path = "../strata-gpu" }
 strata-io = { path = "../strata-io" }
 eframe = { version = "0.31", default-features = false, features = ["wgpu", "default_fonts"] }
+egui-wgpu = "0.31"
+wgpu = "24"
 
 [lints]
 workspace = true
