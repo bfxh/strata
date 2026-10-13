@@ -12,6 +12,18 @@ use strata_render::clipmap_layer_count;
 
 fn main() -> eframe::Result<()> {
     let args: Vec<String> = std::env::args().collect();
+    if args.iter().any(|a| a == "--probe-gpu") {
+        match strata_gpu::probe::probe() {
+            Some((backend, name)) => {
+                println!("GPU 可用: backend={backend} adapter={name}");
+                std::process::exit(0);
+            }
+            None => {
+                println!("GPU 不可用（无 adapter，含 software 回退）");
+                std::process::exit(1);
+            }
+        }
+    }
     if let Some(path) = args
         .iter()
         .position(|a| a == "--generate")

@@ -86,6 +86,33 @@ impl TerrainMesh {
     pub fn vertex_count(&self) -> u32 {
         self.n * self.n + 4 * self.n
     }
+
+    /// 顶点位置 (x, z, drop)：主体行主序铺满 [-1,1]²，四段 skirt 为边界位置副本
+    /// + 下坠量。与 `indices()` 的布局严格对偶（测试锁死数量与端点）。
+    pub fn vertices(&self) -> Vec<[f32; 3]> {
+        let n = self.n as usize;
+        let d = 2.0 / (n as f32 - 1.0);
+        let mut v = Vec::with_capacity(self.vertex_count() as usize);
+        for row in 0..n {
+            for col in 0..n {
+                v.push([-1.0 + col as f32 * d, -1.0 + row as f32 * d, 0.0]);
+            }
+        }
+        // south/north：末/首行的列副本；west/east：末/首列的行副本
+        for col in 0..n {
+            v.push([-1.0 + col as f32 * d, -1.0, self.skirt_drop]);
+        }
+        for col in 0..n {
+            v.push([-1.0 + col as f32 * d, 1.0, self.skirt_drop]);
+        }
+        for row in 0..n {
+            v.push([-1.0, -1.0 + row as f32 * d, self.skirt_drop]);
+        }
+        for row in 0..n {
+            v.push([1.0, -1.0 + row as f32 * d, self.skirt_drop]);
+        }
+        v
+    }
 }
 
 /// 每层独立 near/far（消 z-fighting 的构造法，GPU Gems 2 Ch.2）：
@@ -163,6 +190,23 @@ mod tests {
             deg[i as usize] += 1;
         }
         assert!(deg.iter().all(|&d| d > 0));
+    }
+
+    #[test]
+    fn vertices_dual_indices_and_skirt_drops() {
+        let m = TerrainMesh::new(6, 0.05);
+        let v = m.vertices();
+        assert_eq!(v.len(), m.vertex_count() as usize);
+        for &p in &v {
+            assert!(p[0].abs() <= 1.0 && p[1].abs() <= 1.0);
+        }
+        // 主体 drop=0，四段 skirt drop==skirt_drop
+        assert!(v[..36].iter().all(|p| p[2] == 0.0));
+        assert!(v[36..].iter().all(|p| (p[2] - 0.05).abs() < 1e-7));
+        // 每个索引都指向存在的顶点
+        for &i in &m.indices() {
+            assert!((i as usize) < v.len());
+        }
     }
 
     #[test]

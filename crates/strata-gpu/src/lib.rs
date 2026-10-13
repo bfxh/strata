@@ -38,3 +38,7 @@ mod tests {
         assert_eq!(fits, 512); // 512MB / 1MB = 512 个满 tile
     }
 }
+
+pub mod math;
+pub mod probe;
+pub mod renderer;

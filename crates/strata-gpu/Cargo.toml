@@ -9,6 +9,9 @@ license.workspace = true
 [dependencies]
 strata-geo = { path = "../strata-geo" }
 strata-field = { path = "../strata-field" }
+wgpu = "24"
+pollster = "0.4"
+bytemuck = { version = "1", features = ["derive"] }
 
 [lints]
 workspace = true
