@@ -9,8 +9,8 @@
 | A2 clippy(pedantic: geo/exec/nodes) | ✅ 已建 | `xtask gate` | 同上，pedantic 项本轮判红 10+ 处（must_use/cast/float_cmp）|
 | A3 build (--locked, 三平台) | ✅ 已建（本地加 --locked / CI 已接）| `xtask gate` + workflow | Cargo.lock 漂移 ⇒ --locked 判红（lock 已生成并入仓）|
 | B1 test + 覆盖率下限 | ✅ test 已建 / ⏳ 覆盖率阈值待 gate.toml 生效 | `xtask gate` + tarpaulin | 删边界测试使 <90%/70% ⇒ 红（阈值脚本化后）|
-| B2 CPU/GPU parity | ⏳ M1 建 | 待定 | 改 WGSL 一个常数必红 —— 依赖 strata-gpu 落地 |
-| B3 确定性 | ⏳ M2 建 | 待定 | 同 seed 双跑注入非确定性源 |
+| B3 确定性（CPU 侧先行）| 🟡 半建：同 seed 双跑逐位相等 + 量化金标准 `[0,1130,80,1339,2642,3825,2969,4017]`（strata-nodes::region）；跨平台面 M4 接 | `cargo test` | 扰动 noise 核一个常数 ⇒ 金标准红；GPU 侧待 B2 |
+| B2 CPU/GPU parity | ⏳ M1-GPU 建 | 待定 | 改 WGSL 一个常数必红 —— 依赖 strata-gpu 落地 |
 | C1 golden image | ⏳ M1 建 | 待定 | 改 shader 常数使 L1>阈值 |
 | C2 UI 对比度 | ⏳ M3 建 | 待定 | 调低 glass tint 必红 |
 | D1 性能回归 | ⏳ M1 建 | 待定 | 注入 O(n²) 退化 |
@@ -23,8 +23,9 @@
 
 ## 承重设计已挡住的问题（对照 01，G1 门的雏形）
 - P1 → TileCache 字节预算 + LRU（strata-field，本轮 3 个测试锁行为）
-- P3 → Graph dirty 传播（strata-exec，本轮 5 测试）
-- P4 → WorldMm i64 / LocalF32 / RTE（strata-geo，本轮 5 测试含无舍入金标准）
-- P6 底座 → 确定性 i16 序列化（strata-io，本轮 4 测试含逐位一致）
-- P8 规约 → parity 键与量化域定义（strata-nodes `fill` 作最小真值语料）
-- P2/P5 → M1（SDF/clipmap），P7 → M3 UI
+- P3 → Graph dirty 传播（strata-exec，5 测试）+ **RegionCache 增量实测**：4 tile 首建 4 次求算、失效 1 块只重算 1 次（strata-nodes::region）
+- P4 → WorldMm i64 / LocalF32 / RTE（strata-geo，5 测试含无舍入金标准）
+- P5(数据侧) → halo 重叠列跨 tile 逐位一致（region::halo 测试）；渲染侧 skirt/独立 near-far 待 M1-GPU
+- P6 底座 → 确定性 i16 序列化（strata-io，4 测试含逐位一致）
+- P8 规约 → 位确定 noise 核（无超越函数）+ fill 真值 + 量化金标准
+- P2 → M6（SDF）

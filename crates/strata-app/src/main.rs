@@ -4,10 +4,21 @@
 use eframe::egui;
 
 use strata_exec::{DepRadius, Edge, Graph, NodeId};
-use strata_nodes::Fill;
+use strata_field::HeightTile;
+use strata_geo::{TilePos, DEFAULT_TILE_SPAN_PX};
+use strata_nodes::region::NoiseNode;
+use strata_nodes::{CpuNode, Fill};
 use strata_render::clipmap_layer_count;
 
 fn main() -> eframe::Result<()> {
+    let args: Vec<String> = std::env::args().collect();
+    if let Some(path) = args
+        .iter()
+        .position(|a| a == "--generate")
+        .and_then(|i| args.get(i + 1))
+    {
+        return headless_generate(path);
+    }
     let opts = eframe::NativeOptions {
         // wgpu 后端（06/03：DX12/Vulkan/Metal/GL 四后端由 wgpu 择一）
         renderer: eframe::Renderer::Wgpu,
@@ -21,6 +32,67 @@ fn main() -> eframe::Result<()> {
         opts,
         Box::new(|cc| Ok(Box::new(StrataApp::new(cc)))),
     )
+}
+
+/// 无头生成：4×4 个 512² tile 拼成 2048² 高度场，落 `.sh16`（strata-io 确定性 i16）。
+/// 不需要 GPU —— 用来坐实"能生成 + 位确定 + 增量生效"三件事（07 M1 验收的 CPU 侧）。
+fn headless_generate(path: &str) -> eframe::Result<()> {
+    const SPAN: u32 = 512;
+    const HALO: u32 = 8;
+    const GRID: u32 = 4;
+    let node = NoiseNode::new(0x57_0000_0000_0001, 4096, 5);
+    let mut tiles: Vec<Vec<HeightTile>> = Vec::new();
+    let mut eval_calls = 0u64;
+    for ty in 0..GRID {
+        let mut row = Vec::new();
+        for tx in 0..GRID {
+            let pos = TilePos {
+                x: i64::from(tx),
+                y: i64::from(ty),
+                level: 0,
+            };
+            row.push(node.eval_height(pos, SPAN, HALO, DEFAULT_TILE_SPAN_PX));
+            eval_calls += 1;
+        }
+        tiles.push(row);
+    }
+    // 拼装去 halo
+    let side = SPAN * GRID;
+    let mut big = HeightTile::new(
+        TilePos {
+            x: 0,
+            y: 0,
+            level: 0,
+        },
+        side,
+        0,
+        0.0,
+    );
+    for ty in 0..GRID {
+        for tx in 0..GRID {
+            let t = &tiles[ty as usize][tx as usize];
+            for py in 0..SPAN {
+                for px in 0..SPAN {
+                    let v = t.get(px + HALO, py + HALO);
+                    big.set(tx * SPAN + px, ty * SPAN + py, v);
+                }
+            }
+        }
+    }
+    let bytes = strata_io::write_height_i16_le(&big);
+    if let Err(e) = std::fs::write(path, &bytes) {
+        eprintln!("写入 {path} 失败: {e}");
+        std::process::exit(1);
+    }
+    eprintln!(
+        "已生成 {}×{} 高度场（{} 次 tile 求算）→ {} ({} 字节)",
+        side,
+        side,
+        eval_calls,
+        path,
+        bytes.len()
+    );
+    Ok(())
 }
 
 /// 演示用的最小图：一个 fill 节点。M1 起换成真实 DAG。

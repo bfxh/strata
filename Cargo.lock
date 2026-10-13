@@ -2031,6 +2031,7 @@ dependencies = [
  "strata-field",
  "strata-geo",
  "strata-gpu",
+ "strata-io",
  "strata-nodes",
  "strata-render",
 ]

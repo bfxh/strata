@@ -11,6 +11,7 @@ strata-exec = { path = "../strata-exec" }
 strata-nodes = { path = "../strata-nodes" }
 strata-render = { path = "../strata-render" }
 strata-gpu = { path = "../strata-gpu" }
+strata-io = { path = "../strata-io" }
 eframe = { version = "0.31", default-features = false, features = ["wgpu", "default_fonts"] }
 
 [lints]
