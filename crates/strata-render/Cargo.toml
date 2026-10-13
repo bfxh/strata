@@ -1,0 +1,12 @@
+[package]
+name = "strata-render"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+# M0：纯算术（clipmap 层数），无 wgpu。WGSL/wgpu 渲染 pass 在 M1 接 strata-gpu。
+[dependencies]
+strata-geo = { path = "../strata-geo" }
+
+[lints]
+workspace = true

@@ -1,0 +1,14 @@
+[package]
+name = "strata-gpu"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+# M0 骨架：不引 wgpu。设备/surface/tile-cache 编排在 M1 clipmap 渲染器落地时接入。
+# 届时依赖 wgpu，并建立 06 的 B2(parity)/D2(内存预算) 判定门。
+[dependencies]
+strata-geo = { path = "../strata-geo" }
+strata-field = { path = "../strata-field" }
+
+[lints]
+workspace = true

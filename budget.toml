@@ -1,0 +1,13 @@
+# 内存/显存预算（钉死 01-P1、06-D2）。XTASK 与渲染器以此为单一真源。
+# 本机内存常年紧张，默认值取保守档；超限走 LRU 淘汰+降 mip，绝不 OOM 崩溃。
+
+[gpu_tile_cache]
+budget_bytes = 536870912   # 512MB，对齐 strata-gpu::DEFAULT_GPU_BUDGET_BYTES
+tile_span_px = 512          # level-0 tile 边长
+halo_px = 8                 # 接缝消除重叠（03）
+
+[cpu_tile_cache]
+budget_bytes = 268435456   # 256MB，headless/CPU-parity 路径
+
+[process]
+rss_ceiling_bytes = 1610612736   # 1.5GB 总 RSS 上限；D2 门用 job object 实测

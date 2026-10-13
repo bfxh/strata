@@ -1,0 +1,21 @@
+[package]
+name = "strata-app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+strata-geo = { path = "../strata-geo" }
+strata-field = { path = "../strata-field" }
+strata-exec = { path = "../strata-exec" }
+strata-nodes = { path = "../strata-nodes" }
+strata-render = { path = "../strata-render" }
+strata-gpu = { path = "../strata-gpu" }
+eframe = { version = "0.31", default-features = false, features = ["wgpu", "default_fonts"] }
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "strata"
+path = "src/main.rs"

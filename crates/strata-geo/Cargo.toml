@@ -1,0 +1,10 @@
+[package]
+name = "strata-geo"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+
+[lints]
+workspace = true

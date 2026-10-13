@@ -1,0 +1,48 @@
+name: gate
+# 与本地 `cargo xtask gate` 等价（06 文档：禁止 CI 独有步骤成为盲区）。
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+  # 本机/CI 一致的并发纪律；CI 视机器给 2，本地 xtask 内部锁 1
+  CARGO_BUILD_JOBS: 2
+
+jobs:
+  # F1 三平台矩阵：build + test + gate（wgpu 后端 DX12/Vulkan/Metal 各跑一次在 C1 建立后补）
+  matrix:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: swatinem/rust-cache@v2
+      - name: A1 fmt
+        if: runner.os == 'Linux'
+        run: cargo fmt --all --check
+      - name: A2/A3/B1 gate
+        run: cargo run -q -p xtask -- gate
+      # A3 依赖锁定：有 Cargo.lock 时加 --locked
+      - name: A3 deps lock check
+        if: runner.os == 'Linux' && hashFiles('Cargo.lock') != ''
+        run: cargo build --workspace --all-targets --locked
+
+  # B1 覆盖率下限（仅 Linux，codecov 式一次性作业；阈值读 gate.toml）
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: cargo-tarpaulin
+        uses: cargo-bins/cargo-tarpaulin@main
+        with:
+          args: --workspace --out xml
+      - name: (M2+) 接覆盖率阈值判定，先只产出报告

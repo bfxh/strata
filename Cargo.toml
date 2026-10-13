@@ -1,0 +1,28 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/strata-geo",
+    "crates/strata-field",
+    "crates/strata-exec",
+    "crates/strata-nodes",
+    "crates/strata-io",
+    "crates/strata-gpu",
+    "crates/strata-render",
+    "crates/strata-app",
+    "xtask",
+]
+
+[workspace.package]
+version = "0.0.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://example.invalid/strata"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_docs = "allow"
+
+[workspace.lints.clippy]
+# 全局默认 clippy；A2(all) 以 -D warnings 卡这条基线。
+# pedantic 不在这里开——由 xtask 对 core 三 crate 单独 -W clippy::pedantic（06 A2）。
+all = { level = "warn" }

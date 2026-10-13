@@ -1,0 +1,19 @@
+# 门禁阈值（06）。数值改动走单独提交、单值变更（基线双向披露纪律）。
+# M0 只有 B1 覆盖率下限生效；golden/perf/mutants 阈值随对应门建成时填。
+
+[coverage]
+core_floor = 90   # strata-geo / strata-exec / strata-nodes
+default_floor = 70
+
+[golden_image]   # C1（M1 建）
+# 每图逐条登记 L1 阈值；未登记的图默认 0（逐位一致）
+[ [golden] ]
+name = "placeholder"
+l1_max = 0
+
+[perf]           # D1（M1 建）
+regression_pct = 10   # 相对 baseline.json 劣化 >10% 判红
+
+[mutants]        # E1（M2 建）
+crates = ["strata-geo", "strata-exec"]
+# 存活需逐个分诊登记于 gates.md；基线外新增存活 = 红

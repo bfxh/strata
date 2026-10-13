@@ -1,0 +1,12 @@
+[package]
+name = "strata-nodes"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+strata-geo = { path = "../strata-geo" }
+strata-field = { path = "../strata-field" }
+
+[lints]
+workspace = true
