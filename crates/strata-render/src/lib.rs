@@ -2,6 +2,8 @@
 //! wgpu/WGSL 渲染 pass 在 M1 接入本 crate 时以此为准。
 #![allow(clippy::must_use_candidate)] // 与 core 同款豁免高噪声风格项
 
+pub mod mesh;
+
 use strata_geo::TilePos;
 
 /// 覆盖 `view_range_mm`（相对 eye 的最大水平距离）所需的 clipmap 层数。
