@@ -16,6 +16,9 @@ eframe = { version = "0.31", default-features = false, features = ["wgpu", "defa
 egui-wgpu = "0.31"
 wgpu = "24"
 
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = ["Win32_System_ProcessStatus", "Win32_System_Threading"] }
+
 [lints]
 workspace = true
 

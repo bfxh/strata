@@ -141,6 +141,14 @@ impl ClipmapState {
             .collect()
     }
 
+    /// 强制全部层重生成（仅基准/预热用：量"全图重烤"的代价面）。
+    pub fn force_regen_all(&mut self) {
+        for d in self.dirty.iter_mut() {
+            *d = true;
+        }
+        self.refresh();
+    }
+
     pub fn specs(&self) -> &[LayerSpec] {
         &self.specs
     }

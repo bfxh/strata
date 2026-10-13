@@ -19,7 +19,7 @@ license = "MIT OR Apache-2.0"
 repository = "https://example.invalid/strata"
 
 [workspace.lints.rust]
-unsafe_code = "forbid"
+unsafe_code = "deny"          # 默认全禁；确需 FFI 的单点用 #[allow]+理由就地放行
 missing_docs = "allow"
 
 [workspace.lints.clippy]

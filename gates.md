@@ -16,13 +16,13 @@
 
 > M1c 视口冒烟（非门，属人工验收）：strata.exe 渲染循环存活 8s 无 panic（eframe wgpu 面 + paint callback + terrain/sprite 双管线多帧执行）。**像素观感本代理会话无法人工确认，需用户 `cargo run -p strata-app` 目测**；拖拽/WASD/滚轮的交互手感同为待用户验证项。
 | C2 UI 对比度 | ⏳ M3 建 | 待定 | 调低 glass tint 必红 |
-| D1 性能回归 | ⏳ M1 建 | 待定 | 注入 O(n²) 退化 |
-| D2 内存预算 | ⏳ M1 建 | 待定 | 关 LRU 淘汰使 RSS 超 budget.toml |
+| D1 性能回归 | ✅ 建成（本机口径）：`--bench-render` 实测 CPU 核 + GPU 帧管线（每帧 poll(Wait) 真同步）；基线 bench/baseline.env（NOISE 60.7ms / REGEN 19.4ms / FPS 237.3 / P50 4.33ms），余量 CPU+10%、FPS−25%（debug 口径、不含 egui/UI，已登记） | `xtask bench --check`（gate 内自动） | selftest 负对照：CPU 劣化2×/FPS掉40%/RSS超预算 全判红、5%抖动不误红；比较器与实门共用同一 evaluate_against |
+| D2 内存预算 | ✅ 建成（bench 面）：GetProcessMemoryInfo 峰值 RSS 自报（本机 243MB < 上限 512MB） | 同上（PEAK_RSS_MB_MAX=512） | RSS 项入负对照表；UI 壳层 RSS 属 M3 另建 |
 | E1 变异门 | ⏳ M2 建 | 待定 | 弱化断言必冒新增存活 |
 | F1 三平台矩阵 | ✅ CI 已接（build/test 级）| workflow | 任一平台红 |
 | G1 文档门（P1–P8 有归属）| ⏳ 脚本化待定 | 待定 | 新承重算法无 02 出处 ⇒ 红 |
 
-已建门数 **7/14**（C1 双哈希 + 漫游增量入列），B2（CPU/GPU parity）仍是 ⏳——现 shader 采的是 CPU 生成的多层高度纹理，GPU 独立算噪声的成对实现未落地，不能算 parity 已建。判定类硬门随后续里程碑逐个建，每个建时必须同批登记负对照，否则不计入。
+已建门数 **9/14**（D1/D2 入列，均带负对照），B2（CPU/GPU parity）仍是 ⏳——现 shader 采的是 CPU 生成的多层高度纹理，GPU 独立算噪声的成对实现未落地，不能算 parity 已建。判定类硬门随后续里程碑逐个建，每个建时必须同批登记负对照，否则不计入。
 
 ## 承重设计已挡住的问题（对照 01，G1 门的雏形）
 - P1 → TileCache 字节预算 + LRU（strata-field，本轮 3 个测试锁行为）

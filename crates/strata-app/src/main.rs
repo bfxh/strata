@@ -32,6 +32,22 @@ fn main() -> eframe::Result<()> {
             }
         }
     }
+    if let Some(idx) = args.iter().position(|a| a == "--bench-render") {
+        let frames: u32 = args
+            .get(idx + 1)
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(120);
+        return match strata_app::bench::run_render_bench(frames) {
+            Some(rep) => {
+                rep.print();
+                Ok(())
+            }
+            None => {
+                println!("BENCH SKIP: 本机无可用 GPU adapter");
+                std::process::exit(2);
+            }
+        };
+    }
     if let Some(path) = args
         .iter()
         .position(|a| a == "--generate")
