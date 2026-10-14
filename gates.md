@@ -27,6 +27,7 @@
 - 三平台矩阵跑 `cargo xtask gate` 全链 = 本地同一入口；deps job 单独钉 `--locked` 一致性。
 - **无登记 GPU 的 runner 上的行为（设计而非缺陷）**：C1 哈希项与 D1/D2 数值项按 TARGET 平台键 SKIP 并在日志披露；**恒判项**=双跑复现性、非空图、selftest 负对照、fmt/clippy/build/test 全家。
 - 债务（M2 接入，首版不发防假红掩盖真红）：① 跨平台 golden/bench 分文件基线登记；② cargo-deny（audit/licenses）；③ 覆盖率下限 tarpaulin；④ release 流水线（tag→三平台产物→canary）。
+- 🔴 债务（2026-10-15 目测暴露）：**窗口 sprite 贴回路径零测试覆盖**——C1 golden 读离屏 target 本身、绕过 sprite，M1c 只冒烟"无 panic"，结果 `h=from_bottom_px-top_px` 算成 0 致视口全白却一路 CI 绿（已修 `54803ff`）。待补：headless 走完整 sprite blit（terrain→display 纹理→回读非空且≈target）的窗口路径回归测，把"空白视口"钉成会判红。
 | G1 文档门（P1–P8 有归属）| ⏳ 脚本化待定 | 待定 | 新承重算法无 02 出处 ⇒ 红 |
 
 已建门数 **10/14**（M2b-B2 入列：CPU↔WGSL 噪声核同机差分对拍，plain 逐位=0、warped≤1 LSB 分层容差，负对照 seed+1 判红）。C2（UI 对比度）纯数据层已建（`strata-ui`，最坏底判据 + 实测反推 token alpha + 压 alpha 负对照），但**像素级 golden-image 断言待 M3 视口接线，暂不计入完整门**。判定类硬门随后续里程碑逐个建，每个建时必须同批登记负对照，否则不计入。
