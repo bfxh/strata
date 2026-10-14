@@ -46,7 +46,7 @@
 | 守恒不变量 Σ(h+sed) | ✅ 实测钉死 | 闭合边界 40 步水/沉积守恒 <1e-4；水无源汇守恒 |
 | 位确定 + 金标准 | ✅ | 热/水双跑逐位一致；hydraulic 量化首行 `[0,94,0,842,2279,3601,4378,4913]`（本机冻结，B3）|
 | 热侵蚀收敛不震荡 | ✅ 判红选定 | 双缓冲并行版过冲振荡被实测否决 ⇒ 改 Gauss-Seidel 就地松弛（凸组合单调）|
-| GPU ping-pong + parity(B2) | ✅ B2 门建成（M2b）| `strata-gpu::parity` + `noise_parity.wgsl`（device 申请 SHADER_INT64）对拍 CPU：plain fBm 4096/4096 逐位=0（承重路径），warped ≤1 LSB（本机 4094/4096，差值=FMA 融合经 warp 粗 round 放大，P8 一手证据分层登记）；负对照 seed+1 判红。B2-0 探针另证 u64 算术逐位准、splitmix64 可直译。**仍待**：GPU 侵蚀 ping-pong + 1024² 交互式 ≥30fps |
+| GPU ping-pong + parity(B2) | ✅ B2 门建成（M2b）| `strata-gpu::parity` + `noise_parity.wgsl`（device 申请 SHADER_INT64）对拍 CPU：跨后端**每格 max\|Δ\|≤1 LSB**（本机 Vulkan plain 全 0/warp 2 格；CI macOS plain 1 格——驱动 FMA 融合在量化 .5 边界的必然漂移，P8 一手证据分层登记）。恒判 GPU 双跑自复现；负对照 seed+1⇒Δ26922 判红。**仍待**：GPU 侵蚀 ping-pong + 1024² 交互式 ≥30fps |
 | 1024² 交互式 ≥30fps | ⏳ M2b | 需 GPU 步进 + dirty-tile 增量 |
 
 ## M3 · 双视图 UI —— 简繁同真相

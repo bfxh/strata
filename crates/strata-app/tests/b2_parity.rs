@@ -2,18 +2,21 @@
 //!
 //! 与 C1 golden 不同——这是**同机差分**判据（不依赖平台哈希）：只要 GPU 能建
 //! SHADER_INT64 device，就把 CPU 现算的期望值和 GPU 回读逐位对拍。
-//! - 有 device：GPU 双跑逐位自复现（恒严）+ GPU vs CPU 在分层容差内；
+//! - 有 device：GPU 双跑逐位自复现（恒严）+ GPU vs CPU 在容差内；
 //! - 无 adapter / 无 SHADER_INT64：SKIP 并披露（不假绿）。
 //!
-//! 分层容差（实测钉死，P8 的第一手证据）：
-//! 分层容差（实测钉死，P8 的第一手证据）：
-//! - **plain fBm（地形实际采样路径）：max|Δ| = 0**（4096/4096 逐位一致）；
-//! - **warped fBm：max|Δ| ≤ 1**（本机实测 4094/4096 一致，2 格差 1 LSB）。
-//!   warp 那层「量化到整毫米」的粗 `.round()` 会把驱动 FMA 融合（WGSL 规范允许的
-//!   `a*b+c`→fma）带来的 1-ulp 浮点差放大成 ±1 —— 这正是 CPU/GPU parity 的经典痛点，
-//!   用容差显式登记而非假装不存在。真正的常数/拓扑错误会让 Δ 远超此界 ⇒ 必红。
+//! 分层容差（**两平台实测**钉死，P8 的第一手证据）：
+//! - **本机 Vulkan/RTX**：plain fBm 4096/4096 逐位=0，warped 4094/4096（max 1）。
+//! - **CI macOS（Metal/MoltenVK）**：plain fBm 4095/4096（1 格差 1 LSB）。
+//!   ⇒ 跨后端 f32 量化对拍**不可能承诺逐位**：WGSL 规范允许驱动把 `a*b+c` 融成 FMA，
+//!   1-ulp 浮点差在 `v*32767` 落在 .5 边界附近时翻一个 LSB（连 plain 路径都会，
+//!   只是概率低于 warp 的双重量化）。门的诚实口径 = **每格 max|Δ| ≤ 1**（0.003% 量化步），
+//!   并逐跑披露相等格数；真正的常数/拓扑错误让 Δ 远超此界 ⇒ 必红。
 //!
-//! 负对照：seed+1 的 GPU 输出与 CPU(seed=42) 期望比较 ⇒ 必须 DIFF（证明有牙）。
+//! 负对照：seed+1 ⇒ max|Δ|=26922（远超 1）判红，证明比较器有牙、不是空转。
+//!
+//! 教训：本机 strict=0 是**过拟合本机驱动**的假象，第二平台（CI macOS）才揭穿——
+//! 正是三平台矩阵的价值（06/本机绿≠CI 绿）。
 
 use std::sync::{Mutex, MutexGuard};
 use strata_gpu::parity::{noise_parity_grid, ParityParams};
@@ -27,9 +30,8 @@ fn gpu_lock() -> MutexGuard<'static, ()> {
 
 const N: u32 = 64;
 const STEP_MM: i32 = 97;
-/// 分层容差：plain 承重路径逐位=0；含 warp 允许 1 LSB（FMA 边界，见文件头）。
-const TOL_PLAIN: i64 = 0;
-const TOL_WARPED: i64 = 1;
+/// 跨后端 f32 量化对拍的诚实口径：每格 ≤1 LSB（FMA 融合，WGSL 允许，两平台实测）。
+const TOL_F32_QUANT: i64 = 1;
 
 /// CPU 侧：NoiseNode 采样整网格并量化成 i32（与 strata-field::quantize_i16 同式）。
 fn cpu_grid(node: &NoiseNode) -> Vec<i32> {
@@ -108,13 +110,13 @@ fn run_case(label: &str, warp: bool, tol: i64) {
 }
 
 #[test]
-fn b2_parity_noise_plain_bitexact() {
-    run_case("无 warp（承重）", false, TOL_PLAIN);
+fn b2_parity_noise_plain_within_1ulp() {
+    run_case("无 warp（承重）", false, TOL_F32_QUANT);
 }
 
 #[test]
 fn b2_parity_noise_warped_within_1ulp() {
-    run_case("有 warp", true, TOL_WARPED);
+    run_case("有 warp", true, TOL_F32_QUANT);
 }
 
 #[test]
@@ -133,7 +135,7 @@ fn b2_negative_control_seed_shift_must_differ() {
         .max()
         .unwrap();
     assert!(
-        max_diff > TOL_PLAIN,
+        max_diff > TOL_F32_QUANT,
         "负对照失效：改 seed 却没让对拍变红 ⇒ 门是空转"
     );
     println!("B2 NEG-CTL PASS: seed 变化使 max|Δ|={max_diff} ⇒ 判红");
