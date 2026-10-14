@@ -539,10 +539,19 @@ pub struct OffscreenTerrain {
     device: Arc<wgpu::Device>,
     queue: Arc<wgpu::Queue>,
     gpu: Arc<Mutex<TerrainGpu>>,
+    platform_key: String,
 }
 
-/// 申请一个可离屏渲染的 device/queue（无 surface）。失败 ⇒ None。
-pub fn request_offscreen_device() -> Option<(Arc<wgpu::Device>, Arc<wgpu::Queue>)> {
+/// 离屏设备三元组。`platform_key = "os|adapter|backend"`——
+/// 判定门（C1 哈希 / D1 帧率基线）只对**登记过的平台**生效，未登记平台
+/// 跑复现性断言并 SKIP 披露，防"跨 GPU 假红"掩盖真红。
+pub struct OffscreenDevice {
+    pub device: Arc<wgpu::Device>,
+    pub queue: Arc<wgpu::Queue>,
+    pub platform_key: String,
+}
+
+pub fn request_offscreen_device() -> Option<OffscreenDevice> {
     let instance = wgpu::Instance::default();
     let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
         power_preference: wgpu::PowerPreference::default(),
@@ -556,6 +565,8 @@ pub fn request_offscreen_device() -> Option<(Arc<wgpu::Device>, Arc<wgpu::Queue>
             ..Default::default()
         }))
     })?;
+    let info = adapter.get_info();
+    let platform_key = format!("{}|{}|{:?}", std::env::consts::OS, info.name, info.backend);
     let (device, queue) = pollster::block_on(adapter.request_device(
         &wgpu::DeviceDescriptor {
             label: Some("strata-offscreen"),
@@ -566,19 +577,29 @@ pub fn request_offscreen_device() -> Option<(Arc<wgpu::Device>, Arc<wgpu::Queue>
         None,
     ))
     .ok()?;
-    Some((Arc::new(device), Arc::new(queue)))
+    Some(OffscreenDevice {
+        device: Arc::new(device),
+        queue: Arc::new(queue),
+        platform_key,
+    })
 }
 
 impl OffscreenTerrain {
     /// 无 adapter / device 失败 ⇒ None（不 panic）。
     pub fn new() -> Option<Self> {
-        let (device, queue) = request_offscreen_device()?;
-        let gpu = TerrainGpu::new(&device, wgpu::TextureFormat::Rgba8Unorm);
+        let d = request_offscreen_device()?;
+        let gpu = TerrainGpu::new(&d.device, wgpu::TextureFormat::Rgba8Unorm);
         Some(Self {
-            device,
-            queue,
+            device: d.device,
+            queue: d.queue,
             gpu: Arc::new(Mutex::new(gpu)),
+            platform_key: d.platform_key,
         })
+    }
+
+    /// 本实例所在平台键（"os|adapter|backend"），门用它对照登记基线。
+    pub fn platform_key(&self) -> &str {
+        &self.platform_key
     }
 
     /// 渲染并回读 RGBA8（size×size）。单层 legacy 参数 ⇒ 像素与 C1#1 基线口径一致。

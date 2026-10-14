@@ -16,6 +16,7 @@ use strata_render::mesh::TerrainMesh;
 use crate::clipmap_state::{demo_scene, Cam3, SceneParams};
 
 pub struct BenchReport {
+    pub platform_key: String,
     pub noise_tile_ms: f64,
     pub clipmap_full_regen_ms: f64,
     pub avg_fps: f64,
@@ -29,6 +30,7 @@ pub struct BenchReport {
 impl BenchReport {
     /// 机器可读输出（xtask 逐行解析）。
     pub fn print(&self) {
+        println!("PLATFORM={}", self.platform_key);
         println!("NOISE_TILE_MS={:.3}", self.noise_tile_ms);
         println!("CLIPMAP_FULL_REGEN_MS={:.3}", self.clipmap_full_regen_ms);
         println!("AVG_FPS={:.2}", self.avg_fps);
@@ -45,7 +47,8 @@ impl BenchReport {
 
 /// 跑 N 帧渲染基准。无 GPU ⇒ None（打印 SKIP，调用方决定如何处置）。
 pub fn run_render_bench(frames: u32) -> Option<BenchReport> {
-    let (device, queue) = request_offscreen_device()?;
+    let dev = request_offscreen_device()?;
+    let (device, queue) = (dev.device, dev.queue);
     let params = SceneParams::default();
 
     // 1) CPU 噪声核：512² 单 tile 求算（min-of-3，压掉调度抖动）
@@ -129,6 +132,7 @@ pub fn run_render_bench(frames: u32) -> Option<BenchReport> {
     let p95 = frame_ms[((frame_ms.len() as f64 * 0.95).floor() as usize).min(frame_ms.len() - 1)];
 
     Some(BenchReport {
+        platform_key: dev.platform_key,
         noise_tile_ms,
         clipmap_full_regen_ms: full_regen_ms,
         avg_fps,

@@ -19,7 +19,12 @@
 | D1 性能回归 | ✅ 建成（本机口径）：`--bench-render` 实测 CPU 核 + GPU 帧管线（每帧 poll(Wait) 真同步）；基线 bench/baseline.env（NOISE 60.7ms / REGEN 19.4ms / FPS 237.3 / P50 4.33ms），余量 CPU+10%、FPS−25%（debug 口径、不含 egui/UI，已登记） | `xtask bench --check`（gate 内自动） | selftest 负对照：CPU 劣化2×/FPS掉40%/RSS超预算 全判红、5%抖动不误红；比较器与实门共用同一 evaluate_against |
 | D2 内存预算 | ✅ 建成（bench 面）：GetProcessMemoryInfo 峰值 RSS 自报（本机 243MB < 上限 512MB） | 同上（PEAK_RSS_MB_MAX=512） | RSS 项入负对照表；UI 壳层 RSS 属 M3 另建 |
 | E1 变异门 | ⏳ M2 建 | 待定 | 弱化断言必冒新增存活 |
-| F1 三平台矩阵 | ✅ CI 已接（build/test 级）| workflow | 任一平台红 |
+| F1 三平台矩阵 | ✅ CI 已接（build/test/gate 级）| workflow `gate.yml`（push/PR on master）| 任一平台红 |
+
+## CI/CD 现状与债务（GitHub Actions @ bfxh/strata，private）
+- 三平台矩阵跑 `cargo xtask gate` 全链 = 本地同一入口；deps job 单独钉 `--locked` 一致性。
+- **无登记 GPU 的 runner 上的行为（设计而非缺陷）**：C1 哈希项与 D1/D2 数值项按 TARGET 平台键 SKIP 并在日志披露；**恒判项**=双跑复现性、非空图、selftest 负对照、fmt/clippy/build/test 全家。
+- 债务（M2 接入，首版不发防假红掩盖真红）：① 跨平台 golden/bench 分文件基线登记；② cargo-deny（audit/licenses）；③ 覆盖率下限 tarpaulin；④ release 流水线（tag→三平台产物→canary）。
 | G1 文档门（P1–P8 有归属）| ⏳ 脚本化待定 | 待定 | 新承重算法无 02 出处 ⇒ 红 |
 
 已建门数 **9/14**（D1/D2 入列，均带负对照），B2（CPU/GPU parity）仍是 ⏳——现 shader 采的是 CPU 生成的多层高度纹理，GPU 独立算噪声的成对实现未落地，不能算 parity 已建。判定类硬门随后续里程碑逐个建，每个建时必须同批登记负对照，否则不计入。

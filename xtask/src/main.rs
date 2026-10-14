@@ -166,7 +166,11 @@ fn parse_kv(text: &str) -> HashMap<String, f64> {
     m
 }
 
-fn run_bench_bin() -> Result<Option<HashMap<String, f64>>, i32> {
+/// bench 一次采样的结果：（指标表, 平台键）。
+type BenchOutcome = (HashMap<String, f64>, String);
+
+/// 跑一次 bench bin：返回（指标, 平台键）；无 GPU ⇒ None。
+fn run_bench_bin() -> Result<Option<BenchOutcome>, i32> {
     let out = Command::new(cargo_bin())
         .args([
             "run",
@@ -195,7 +199,12 @@ fn run_bench_bin() -> Result<Option<HashMap<String, f64>>, i32> {
         eprintln!("{text}");
         return Err(out.status.code().unwrap_or(101));
     }
-    Ok(Some(parse_kv(&text)))
+    let platform = text
+        .lines()
+        .find_map(|l| l.strip_prefix("PLATFORM="))
+        .unwrap_or("unknown")
+        .to_string();
+    Ok(Some((parse_kv(&text), platform)))
 }
 
 fn load_baseline() -> Result<HashMap<String, f64>, i32> {
@@ -207,10 +216,19 @@ fn load_baseline() -> Result<HashMap<String, f64>, i32> {
     Ok(parse_kv(&text))
 }
 
-/// 对照基线判红。返回 Err 即门红。`None`（无 GPU）按 strict 决定红或披露。
+fn baseline_target() -> String {
+    fs::read_to_string(BASELINE_PATH)
+        .unwrap_or_default()
+        .lines()
+        .find_map(|l| l.strip_prefix("TARGET="))
+        .unwrap_or("unknown")
+        .to_string()
+}
+
+/// 对照基线判红。无 GPU/未登记平台 ⇒ SKIP 披露（不假红）；登记平台全指标判。
 fn bench_check(strict: bool) -> Result<(), i32> {
     println!("\n[xtask] == D1/D2 bench ==");
-    let Some(got) = run_bench_bin()? else {
+    let Some((got, platform)) = run_bench_bin()? else {
         if strict {
             eprintln!("[xtask] ✗ D1/D2: 无 GPU 且机器未登记豁免（gate 须在有 GPU 面跑）");
             return Err(101);
@@ -218,6 +236,14 @@ fn bench_check(strict: bool) -> Result<(), i32> {
         ok("D1/D2", "SKIP（无 adapter，披露）");
         return Ok(());
     };
+    let target = baseline_target();
+    if platform != target {
+        ok(
+            "D1/D2",
+            &format!("SKIP（平台未登记: {platform}；基线 {target} 生效，登记走分文件提交）"),
+        );
+        return Ok(());
+    }
     let base = load_baseline()?;
     let fails = evaluate_against(&base, &got);
     if fails.is_empty() {
@@ -233,13 +259,14 @@ fn bench_check(strict: bool) -> Result<(), i32> {
 
 /// 基线更新（单值改动走单独提交纪律——全量重录要在提交说明里逐项披露）。
 fn bench_update() -> Result<(), i32> {
-    let Some(got) = run_bench_bin()? else {
+    let Some((got, platform)) = run_bench_bin()? else {
         eprintln!("[xtask] ✗ bench --update 需要 GPU（无 adapter 拒绝录基线）");
         return Err(101);
     };
     let mut out = String::from(
-        "# D1/D2 基线（本机 Vulkan/RTX4060Ti, debug, min-of-3；余量 CPU±10% / FPS -25%）\n",
+        "# D1/D2 基线（debug, min-of-3；余量 CPU±10% / FPS -25%；TARGET 外的平台跑复现性不跑哈希）\n",
     );
+    out.push_str(&format!("TARGET={platform}\n"));
     for k in [
         "NOISE_TILE_MS",
         "CLIPMAP_FULL_REGEN_MS",

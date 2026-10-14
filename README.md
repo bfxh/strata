@@ -19,3 +19,10 @@ Python 侧挂物理引擎/外部渲染管线。
 ## 一句话定位
 
 > Gaea 的速度 + Houdini 的可编程性 + Blender 的免费，痛点对着 01 号文档逐条避开。
+
+## 现状
+
+- 里程碑：M0–M1 已关账（多层 clipmap 漫游、位确定生成核、237fps@1280×720、RSS 243MB）；M2 侵蚀待启动
+- CI/CD：GitHub Actions 三平台矩阵（`cargo xtask gate` 全链 = 本地同一入口），门禁 9/14 建成且全部带负对照
+- 本地跑：`cargo run -p strata-app`（视口）｜`cargo xtask gate`（门线）｜`cargo run -p strata-app -- --bench-render 90`（性能自检）
+

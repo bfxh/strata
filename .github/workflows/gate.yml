@@ -1,19 +1,19 @@
 name: gate
-# 与本地 `cargo xtask gate` 等价（06 文档：禁止 CI 独有步骤成为盲区）。
+# 与本地 `cargo xtask gate` 等价（06：禁止 CI 独有步骤成为盲区）。
+# GPU 面：C1/D1/D2 在无登记 GPU 的 runner 上按设计 SKIP 并在日志披露，
+# 复现性断言与 selftest 负对照在所有平台恒判。
 on:
   push:
-    branches: [main]
+    branches: [master]
   pull_request:
-    branches: [main]
+    branches: [master]
 
 env:
   CARGO_TERM_COLOR: always
-  # 本机/CI 一致的并发纪律；CI 视机器给 2，本地 xtask 内部锁 1
-  CARGO_BUILD_JOBS: 2
+  CARGO_NET_GIT_FETCH_WITH_CLI: "true"
 
 jobs:
-  # F1 三平台矩阵：build + test + gate（wgpu 后端 DX12/Vulkan/Metal 各跑一次在 C1 建立后补）
-  matrix:
+  gate:
     strategy:
       fail-fast: false
       matrix:
@@ -25,24 +25,18 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: swatinem/rust-cache@v2
-      - name: A1 fmt
-        if: runner.os == 'Linux'
-        run: cargo fmt --all --check
-      - name: A2/A3/B1 gate
+      # A1-A3/B1/D1/D2(selftest+bench) 全链，与本地同一入口
+      - name: cargo xtask gate
         run: cargo run -q -p xtask -- gate
-      # A3 依赖锁定：有 Cargo.lock 时加 --locked
-      - name: A3 deps lock check
-        if: runner.os == 'Linux' && hashFiles('Cargo.lock') != ''
-        run: cargo build --workspace --all-targets --locked
 
-  # B1 覆盖率下限（仅 Linux，codecov 式一次性作业；阈值读 gate.toml）
-  coverage:
+  # 依赖锁定单独钉一条（--locked 漂移即红；xtask gate 内已含，这里做早期快失败）
+  deps:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - name: cargo-tarpaulin
-        uses: cargo-bins/cargo-tarpaulin@main
-        with:
-          args: --workspace --out xml
-      - name: (M2+) 接覆盖率阈值判定，先只产出报告
+      - name: lockfile consistency
+        run: cargo metadata --locked --format-version 1 >/dev/null
+
+  # ⏳ 债务（gates.md 已记）：覆盖率下限/tarpaulin、A3 cargo-deny、跨平台 golden 分文件基线，
+  # 首版不发防止假红掩盖真红，M2 一起接入。
