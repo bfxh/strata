@@ -6,6 +6,7 @@
 //! （noise/region 自带确定性金标准），WGSL 成对实现随 GPU 渲染步接入。
 #![allow(clippy::must_use_candidate)] // core crate 开 pedantic，但豁免此高噪声风格项
 
+pub mod erosion;
 pub mod noise;
 pub mod region;
 

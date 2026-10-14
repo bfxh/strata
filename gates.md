@@ -9,7 +9,7 @@
 | A2 clippy(pedantic: geo/exec/nodes) | ✅ 已建 | `xtask gate` | 同上，pedantic 项本轮判红 10+ 处（must_use/cast/float_cmp）|
 | A3 build (--locked, 三平台) | ✅ 已建（本地加 --locked / CI 已接）| `xtask gate` + workflow | Cargo.lock 漂移 ⇒ --locked 判红（lock 已生成并入仓）|
 | B1 test + 覆盖率下限 | ✅ test 已建 / ⏳ 覆盖率阈值待 gate.toml 生效 | `xtask gate` + tarpaulin | 删边界测试使 <90%/70% ⇒ 红（阈值脚本化后）|
-| B3 确定性（CPU 侧先行）| 🟡 半建：同 seed 双跑逐位相等 + 量化金标准 `[0,1130,80,1339,2642,3825,2969,4017]`（strata-nodes::region）；跨平台面 M4 接 | `cargo test` | 扰动 noise 核一个常数 ⇒ 金标准红；GPU 侧待 B2 |
+| B3 确定性（CPU 侧先行）| 🟡 半建：同 seed 双跑逐位相等 + 量化金标准 `[0,1130,80,1339,2642,3825,2969,4017]`（strata-nodes::region）+ **M2a 侵蚀金标准 `[0,94,0,842,2279,3601,4378,4913]`**（hydraulic 25 步双跑逐位 + 热/水 Σ(h+sed) 守恒 40 步）；跨平台面 M4 接 | `cargo test` | 扰动 noise/erosion 核一个常数 ⇒ 金标准红；GPU 侧待 B2 |
 | B2 CPU/GPU parity | ⏳ M1-GPU 建 | 待定 | 改 WGSL 一个常数必红 —— 依赖 strata-gpu 落地 |
 | C1 golden image | ✅ 建成（本机口径）：两张冻结哈希——C1#1 单层 legacy `17092285482363414448`、C1#2 十层 clipmap 场景 `3779239380702403447`；各跑双次自复现 + 非空图；无 adapter 机器 SKIP 并披露 | `cargo test -p strata-app --test c1_golden` | 改 WGSL/mesh/层参数必红；跨平台基线分文件登记待接入 |
 | P3 漫游增量 | ✅ 建成：37 帧斜线漫游重生成次数 ∈ (0, 37×层) —— 既非全图重烤也非从不更新 | `roam_regen_is_incremental_not_full_rebake` | 把 move_eye 改成全 dirty ⇒ delta 触上限红；改成不动 ⇒ delta=0 红 |
