@@ -40,5 +40,6 @@ mod tests {
 }
 
 pub mod math;
+pub mod parity;
 pub mod probe;
 pub mod renderer;

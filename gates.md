@@ -10,7 +10,7 @@
 | A3 build (--locked, 三平台) | ✅ 已建（本地加 --locked / CI 已接）| `xtask gate` + workflow | Cargo.lock 漂移 ⇒ --locked 判红（lock 已生成并入仓）|
 | B1 test + 覆盖率下限 | ✅ test 已建 / ⏳ 覆盖率阈值待 gate.toml 生效 | `xtask gate` + tarpaulin | 删边界测试使 <90%/70% ⇒ 红（阈值脚本化后）|
 | B3 确定性（CPU 侧先行）| 🟡 半建：同 seed 双跑逐位相等 + 量化金标准 `[0,1130,80,1339,2642,3825,2969,4017]`（strata-nodes::region）+ **M2a 侵蚀金标准 `[0,94,0,842,2279,3601,4378,4913]`**（hydraulic 25 步双跑逐位 + 热/水 Σ(h+sed) 守恒 40 步）；跨平台面 M4 接 | `cargo test` | 扰动 noise/erosion 核一个常数 ⇒ 金标准红；GPU 侧待 B2 |
-| B2 CPU/GPU parity | 🟡 技术前置已量（B2-0 探针，**结论已更正**）：本机 wgpu24/Naga-24/Vulkan 开 `SHADER_INT64` 后 **u64 乘/加/移位/异或逐位准**（`direct`/`limb`/`mix_direct`/`mix_limb` 四项 GPU==CPU，splitmix64 可直译）；先前"u64 乘错位"是探针把常量写成 `0xbf58476d1ce4e5b`（少末位 `9`）的笔误，非引擎缺陷，已撤回。真门 B2 路线 = CPU splitmix64 原样 + WGSL 直译（须 device 申请 `SHADER_INT64`）；**跨后端注意**：WebGPU/浏览器不支持 u64 算术 ⇒ 那类后端要退 u32 双 limb 模拟（探针已验证 limb 路同样逐位准） | 探针非门 `cargo test -p strata-gpu -- --ignored u64` | 待 B2 落地：改 WGSL 任一常数或改 CPU 核 ⇒ 逐位差必红 |
+| B2 CPU/GPU parity | ✅ 建成（本机口径，同机差分不需平台哈希）：CPU `strata-nodes::noise` vs WGSL 直译核（`noise_parity.wgsl`，device 申请 `SHADER_INT64`），量化 i16 对拍。分层容差实测钉死：**plain fBm（承重）max\|Δ\|=0（4096/4096 逐位一致）**；warped fBm max\|Δ\|≤1（本机 4094/4096，2 格差 1 LSB = 驱动 FMA 融合被 warp 粗 round 放大，即 P8 一手证据，显式登记不假装）。恒判 GPU 双跑逐位自复现；无 adapter/无 SHADER_INT64 ⇒ SKIP 披露。（B2-0 探针另证 u64 乘/加/移/异或逐位准、splitmix64 可直译；前判"u64 乘错位"系常量少末位的笔误已撤回） | `cargo test -p strata-app --test b2_parity`（gate B1 内自动） | 负对照实测：seed+1 ⇒ max\|Δ\|=26922 判红；改 WGSL 任一常数/拓扑 ⇒ 承重路径 Δ≫0 必红 |
 | C1 golden image | ✅ 建成（本机口径）：两张冻结哈希——C1#1 单层 legacy `17092285482363414448`、C1#2 十层 clipmap 场景 `3779239380702403447`；各跑双次自复现 + 非空图；无 adapter 机器 SKIP 并披露 | `cargo test -p strata-app --test c1_golden` | 改 WGSL/mesh/层参数必红；跨平台基线分文件登记待接入 |
 | P3 漫游增量 | ✅ 建成：37 帧斜线漫游重生成次数 ∈ (0, 37×层) —— 既非全图重烤也非从不更新 | `roam_regen_is_incremental_not_full_rebake` | 把 move_eye 改成全 dirty ⇒ delta 触上限红；改成不动 ⇒ delta=0 红 |
 
@@ -29,7 +29,7 @@
 - 债务（M2 接入，首版不发防假红掩盖真红）：① 跨平台 golden/bench 分文件基线登记；② cargo-deny（audit/licenses）；③ 覆盖率下限 tarpaulin；④ release 流水线（tag→三平台产物→canary）。
 | G1 文档门（P1–P8 有归属）| ⏳ 脚本化待定 | 待定 | 新承重算法无 02 出处 ⇒ 红 |
 
-已建门数 **9/14**（D1/D2 入列，均带负对照），B2（CPU/GPU parity）仍是 ⏳——现 shader 采的是 CPU 生成的多层高度纹理，GPU 独立算噪声的成对实现未落地，不能算 parity 已建。判定类硬门随后续里程碑逐个建，每个建时必须同批登记负对照，否则不计入。
+已建门数 **10/14**（M2b-B2 入列：CPU↔WGSL 噪声核同机差分对拍，plain 逐位=0、warped≤1 LSB 分层容差，负对照 seed+1 判红）。判定类硬门随后续里程碑逐个建，每个建时必须同批登记负对照，否则不计入。
 
 ## 承重设计已挡住的问题（对照 01，G1 门的雏形）
 - P1 → TileCache 字节预算 + LRU（strata-field，本轮 3 个测试锁行为）
@@ -37,5 +37,5 @@
 - P4 → WorldMm i64 / LocalF32 / RTE（strata-geo，5 测试含无舍入金标准）
 - P5(数据侧) → halo 重叠列跨 tile 逐位一致（region::halo 测试）；渲染侧 skirt/独立 near-far 待 M1-GPU
 - P6 底座 → 确定性 i16 序列化（strata-io，4 测试含逐位一致）
-- P8 规约 → 位确定 noise 核（无超越函数）+ fill 真值 + 量化金标准
+- P8 规约 → 位确定 noise 核（无超越函数）+ fill 真值 + 量化金标准；**B2 门实装 CPU↔WGSL 逐位对拍**（plain 0 / warped ≤1 LSB，FMA 边界显式登记）
 - P2 → M6（SDF）
