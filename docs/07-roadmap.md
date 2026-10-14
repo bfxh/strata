@@ -49,6 +49,7 @@
 | GPU ping-pong + parity(B2) | ✅ B2 门建成（M2b）| `strata-gpu::parity` + `noise_parity.wgsl` + `hydraulic_parity.wgsl`（device 申请 SHADER_INT64）对拍 CPU：噪声跨后端每格 ≤1 LSB（本机 plain 全 0/warp 2 格；CI macOS plain 1 格——FMA 量化边界，P8 分层登记）；侵蚀核单步 max\|Δ\|=0 三场逐位、多步混沌放大（12 步≈652，门只判单步+GPU 自复现）。恒判 GPU 双跑自复现；负对照 seed+1⇒Δ26922 / k_capacity×2⇒Δ210 判红。 |
 | 1024² 交互式 ≥30fps | ✅ 实测达标 | `--bench-erosion`：1024² 每帧 8 步 GPU 水力侵蚀 **245.9fps**（单步 0.508ms，含 poll(Wait) 真同步，debug 口径）；D1 门入基线 EROSION_FPS/EROSION_STEP_MS（−25%/+25% 余量）+ selftest 两项侵蚀负对照。视口内交互式触发留 M3 接 UI |
 | 撤销/重做栈（DAG 纯数据）| ✅ | `strata-exec::history::History<S>` 快照栈：commit 截断 redo 分支、cap 丢最旧保当前、边界 no-op；6 单测（含 `History<Graph>` 回退旧 DAG）进 B1 |
+| 预设系统（4 个起步）| ✅ 数据底座 | `strata-exec::preset` DAG-as-data IR（03「节点=id+kind+params+inputs」）：`Preset`+`NodeSpec`+`Param(Float/Int/Seed)`，`compile`→`Graph` 校验重复id/未知输入/环（fail-closed）；火山岛/峡谷/喀斯特/雪原 4 预设拓扑真值，7 单测进 B1（含预设喂进 History 撤销闭环）。求值接线（预设真跑成地形）属 M3 视口 |
 
 ## M3 · 双视图 UI —— 简繁同真相
 
