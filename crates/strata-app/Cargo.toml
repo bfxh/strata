@@ -12,7 +12,9 @@ strata-nodes = { path = "../strata-nodes" }
 strata-render = { path = "../strata-render" }
 strata-gpu = { path = "../strata-gpu" }
 strata-io = { path = "../strata-io" }
-eframe = { version = "0.31", default-features = false, features = ["wgpu", "default_fonts"] }
+# x11/wayland：Linux 上 winit 后端由这两个 feature 选择（首轮 CI 判红实证）；
+# windows/macos 后端恒编译不受影响。
+eframe = { version = "0.31", default-features = false, features = ["wgpu", "default_fonts", "x11", "wayland"] }
 egui-wgpu = "0.31"
 wgpu = "24"
 
