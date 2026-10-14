@@ -30,9 +30,16 @@ const PROBE_U64: &str = include_str!("../shaders/probe_u64.wgsl");
 pub struct U64Probe {
     pub shader_int64_feature: bool,
     pub pipeline_built: bool,
-    /// Some([gpu[6], cpu[6]])：mul_direct / mul32 / add32 / mulhi_u16 / shift64 / add64。
-    pub roundtrip: Option<[[u64; 6]; 2]>,
+    /// Some([gpu[4], cpu[4]])：direct/limb/mix_direct/mix_limb（正确 16 位常量下重测 u64 乘）。
+    pub roundtrip: Option<[[u64; 4]; 2]>,
     pub note: String,
+}
+
+/// splitmix64（CPU 参考，与 noise.rs 同款常量）——探针直译/limb 模拟共同的期望值源。
+fn cpu_mix64(mut x: u64) -> u64 {
+    x = (x ^ (x >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    x = (x ^ (x >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+    x ^ (x >> 31)
 }
 
 /// 跑一遍 u64 compute；任何失败以 note 记录并返回，绝不 panic。
@@ -89,21 +96,18 @@ pub fn u64_parity_probe() -> Option<U64Probe> {
         });
     }
 
+    // WGSL Out = 4×u64（direct/limb/mix_direct/mix_limb），偏移 0/8/16/24。
     const SEED: u64 = 0x1234_5678_9abc_def0;
     const C1: u64 = 0xbf58_476d_1ce4_e5b9;
-    // 与 WGSL Out 的 std140-ish 布局一致：mul_direct(0..8) mul32(8..12) add32(12..16)
-    // mulhi(16..20) [pad 20..24] shift64(24..32) add64(32..40) = 40B。
-    let cpu: [u64; 6] = [
+    let cpu: [u64; 4] = [
         SEED.wrapping_mul(C1),
-        u64::from(0x9e37_79b9u32.wrapping_mul(0x85eb_ca6b)),
-        u64::from(0xffff_fff7u32.wrapping_add(9)),
-        u64::from(0xffffu32.wrapping_mul(0xffff)),
-        SEED >> 32,
-        u64::MAX.wrapping_add(7),
+        SEED.wrapping_mul(C1), // limb 模拟须等于直译 wrapping_mul
+        cpu_mix64(SEED),
+        cpu_mix64(SEED),
     ];
     let buf = dev.create_buffer(&wgpu::BufferDescriptor {
         label: Some("probe_out"),
-        size: 40,
+        size: 32,
         usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
         mapped_at_creation: false,
     });
@@ -125,19 +129,19 @@ pub fn u64_parity_probe() -> Option<U64Probe> {
         }
         que.submit(std::iter::once(enc.finish()));
     }
-    // 读回 40B（6 槽，含 20..24 padding）。
+    // 读回 32B（4×u64）。
     let read = dev.create_buffer(&wgpu::BufferDescriptor {
         label: Some("probe_read"),
-        size: 40,
+        size: 32,
         usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,
     });
     {
         let mut enc = dev.create_command_encoder(&Default::default());
-        enc.copy_buffer_to_buffer(&buf, 0, &read, 0, 40);
+        enc.copy_buffer_to_buffer(&buf, 0, &read, 0, 32);
         que.submit(std::iter::once(enc.finish()));
     }
-    let slice = read.slice(0..40);
+    let slice = read.slice(0..32);
     let (tx, rx) = std::sync::mpsc::channel();
     slice.map_async(wgpu::MapMode::Read, move |r| {
         let _ = tx.send(r);
@@ -147,8 +151,7 @@ pub fn u64_parity_probe() -> Option<U64Probe> {
         Ok(Ok(())) => {
             let data = slice.get_mapped_range().to_vec();
             let g64 = |o: usize| u64::from_le_bytes(data[o..o + 8].try_into().unwrap());
-            let g32 = |o: usize| u64::from(u32::from_le_bytes(data[o..o + 4].try_into().unwrap()));
-            let gpu = [g64(0), g32(8), g32(12), g32(16), g64(24), g64(32)];
+            let gpu = [g64(0), g64(8), g64(16), g64(24)];
             Some(U64Probe {
                 shader_int64_feature: has_i64,
                 pipeline_built: true,
@@ -188,25 +191,14 @@ mod u64_probe_test {
                     p.shader_int64_feature, p.pipeline_built, p.note,
                 );
                 if let Some([gpu, cpu]) = p.roundtrip {
-                    let names = [
-                        "mul_direct(u64)",
-                        "mul32",
-                        "add32",
-                        "mulhi_u16",
-                        "shift64",
-                        "add64",
-                    ];
-                    for i in 0..6 {
+                    let names = ["direct", "limb", "mix_direct", "mix_limb"];
+                    for (name, (g, c)) in names.iter().zip(gpu.iter().zip(cpu.iter())) {
                         println!(
-                            "  {:>14}: gpu={:016x} cpu={:016x} {}",
-                            names[i],
-                            gpu[i],
-                            cpu[i],
-                            if gpu[i] == cpu[i] {
-                                "MATCH"
-                            } else {
-                                "*** DIFF ***"
-                            }
+                            "  {:>8}: gpu={:016x} cpu={:016x} {}",
+                            name,
+                            g,
+                            c,
+                            if g == c { "MATCH" } else { "*** DIFF ***" }
                         );
                     }
                 }

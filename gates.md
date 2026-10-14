@@ -10,7 +10,7 @@
 | A3 build (--locked, 三平台) | ✅ 已建（本地加 --locked / CI 已接）| `xtask gate` + workflow | Cargo.lock 漂移 ⇒ --locked 判红（lock 已生成并入仓）|
 | B1 test + 覆盖率下限 | ✅ test 已建 / ⏳ 覆盖率阈值待 gate.toml 生效 | `xtask gate` + tarpaulin | 删边界测试使 <90%/70% ⇒ 红（阈值脚本化后）|
 | B3 确定性（CPU 侧先行）| 🟡 半建：同 seed 双跑逐位相等 + 量化金标准 `[0,1130,80,1339,2642,3825,2969,4017]`（strata-nodes::region）+ **M2a 侵蚀金标准 `[0,94,0,842,2279,3601,4378,4913]`**（hydraulic 25 步双跑逐位 + 热/水 Σ(h+sed) 守恒 40 步）；跨平台面 M4 接 | `cargo test` | 扰动 noise/erosion 核一个常数 ⇒ 金标准红；GPU 侧待 B2 |
-| B2 CPU/GPU parity | 🟡 技术前置已量（B2-0 探针）：本机 Naga-24/wgpu24 上 u64 乘法 GPU≠CPU（`seed*C1` 实得 `d806b4a1e2305f50` vs 期望 `2442545b93a9cb70`），u32 乘/加/u64 加/移位逐位准 ⇒ parity 路线钉为「CPU 保 splitmix64 现有金标准 + WGSL 用 u32 双 limb（每 limb 再拆 u16 防常量折叠）模拟 u64 乘 + 内建 u64 加/移/异或」；真门 B2 落地该路线并同批登记负对照 | 探针非门 `cargo test -p strata-gpu -- --ignored u64` | 待 B2 落地：改 WGSL limb 任一常数或改 CPU 核 ⇒ 逐位差必红 |
+| B2 CPU/GPU parity | 🟡 技术前置已量（B2-0 探针，**结论已更正**）：本机 wgpu24/Naga-24/Vulkan 开 `SHADER_INT64` 后 **u64 乘/加/移位/异或逐位准**（`direct`/`limb`/`mix_direct`/`mix_limb` 四项 GPU==CPU，splitmix64 可直译）；先前"u64 乘错位"是探针把常量写成 `0xbf58476d1ce4e5b`（少末位 `9`）的笔误，非引擎缺陷，已撤回。真门 B2 路线 = CPU splitmix64 原样 + WGSL 直译（须 device 申请 `SHADER_INT64`）；**跨后端注意**：WebGPU/浏览器不支持 u64 算术 ⇒ 那类后端要退 u32 双 limb 模拟（探针已验证 limb 路同样逐位准） | 探针非门 `cargo test -p strata-gpu -- --ignored u64` | 待 B2 落地：改 WGSL 任一常数或改 CPU 核 ⇒ 逐位差必红 |
 | C1 golden image | ✅ 建成（本机口径）：两张冻结哈希——C1#1 单层 legacy `17092285482363414448`、C1#2 十层 clipmap 场景 `3779239380702403447`；各跑双次自复现 + 非空图；无 adapter 机器 SKIP 并披露 | `cargo test -p strata-app --test c1_golden` | 改 WGSL/mesh/层参数必红；跨平台基线分文件登记待接入 |
 | P3 漫游增量 | ✅ 建成：37 帧斜线漫游重生成次数 ∈ (0, 37×层) —— 既非全图重烤也非从不更新 | `roam_regen_is_incremental_not_full_rebake` | 把 move_eye 改成全 dirty ⇒ delta 触上限红；改成不动 ⇒ delta=0 红 |
 
