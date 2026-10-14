@@ -46,7 +46,7 @@
 | 守恒不变量 Σ(h+sed) | ✅ 实测钉死 | 闭合边界 40 步水/沉积守恒 <1e-4；水无源汇守恒 |
 | 位确定 + 金标准 | ✅ | 热/水双跑逐位一致；hydraulic 量化首行 `[0,94,0,842,2279,3601,4378,4913]`（本机冻结，B3）|
 | 热侵蚀收敛不震荡 | ✅ 判红选定 | 双缓冲并行版过冲振荡被实测否决 ⇒ 改 Gauss-Seidel 就地松弛（凸组合单调）|
-| GPU ping-pong + parity(B2) | ⏳ M2b | WGSL 成对实现随 GPU 侵蚀落地接入；现仅 CPU 面 |
+| GPU ping-pong + parity(B2) | 🟡 路线钉死（M2b）| B2-0 探针实测：本机 wgpu24/Naga-24 的 **u64 乘法 GPU≠CPU**，u32 乘/加与 u64 加/移位逐位准 ⇒ parity 走「CPU 保 splitmix64 金标准 + WGSL u32 双 limb（每 limb 拆 u16 防常量折叠）模拟 u64 乘」。落地后建 B2 门（负对照同批登记）|
 | 1024² 交互式 ≥30fps | ⏳ M2b | 需 GPU 步进 + dirty-tile 增量 |
 
 ## M3 · 双视图 UI —— 简繁同真相

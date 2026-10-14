@@ -10,13 +10,13 @@
 | A3 build (--locked, 三平台) | ✅ 已建（本地加 --locked / CI 已接）| `xtask gate` + workflow | Cargo.lock 漂移 ⇒ --locked 判红（lock 已生成并入仓）|
 | B1 test + 覆盖率下限 | ✅ test 已建 / ⏳ 覆盖率阈值待 gate.toml 生效 | `xtask gate` + tarpaulin | 删边界测试使 <90%/70% ⇒ 红（阈值脚本化后）|
 | B3 确定性（CPU 侧先行）| 🟡 半建：同 seed 双跑逐位相等 + 量化金标准 `[0,1130,80,1339,2642,3825,2969,4017]`（strata-nodes::region）+ **M2a 侵蚀金标准 `[0,94,0,842,2279,3601,4378,4913]`**（hydraulic 25 步双跑逐位 + 热/水 Σ(h+sed) 守恒 40 步）；跨平台面 M4 接 | `cargo test` | 扰动 noise/erosion 核一个常数 ⇒ 金标准红；GPU 侧待 B2 |
-| B2 CPU/GPU parity | ⏳ M1-GPU 建 | 待定 | 改 WGSL 一个常数必红 —— 依赖 strata-gpu 落地 |
+| B2 CPU/GPU parity | 🟡 技术前置已量（B2-0 探针）：本机 Naga-24/wgpu24 上 u64 乘法 GPU≠CPU（`seed*C1` 实得 `d806b4a1e2305f50` vs 期望 `2442545b93a9cb70`），u32 乘/加/u64 加/移位逐位准 ⇒ parity 路线钉为「CPU 保 splitmix64 现有金标准 + WGSL 用 u32 双 limb（每 limb 再拆 u16 防常量折叠）模拟 u64 乘 + 内建 u64 加/移/异或」；真门 B2 落地该路线并同批登记负对照 | 探针非门 `cargo test -p strata-gpu -- --ignored u64` | 待 B2 落地：改 WGSL limb 任一常数或改 CPU 核 ⇒ 逐位差必红 |
 | C1 golden image | ✅ 建成（本机口径）：两张冻结哈希——C1#1 单层 legacy `17092285482363414448`、C1#2 十层 clipmap 场景 `3779239380702403447`；各跑双次自复现 + 非空图；无 adapter 机器 SKIP 并披露 | `cargo test -p strata-app --test c1_golden` | 改 WGSL/mesh/层参数必红；跨平台基线分文件登记待接入 |
 | P3 漫游增量 | ✅ 建成：37 帧斜线漫游重生成次数 ∈ (0, 37×层) —— 既非全图重烤也非从不更新 | `roam_regen_is_incremental_not_full_rebake` | 把 move_eye 改成全 dirty ⇒ delta 触上限红；改成不动 ⇒ delta=0 红 |
 
 > M1c 视口冒烟（非门，属人工验收）：strata.exe 渲染循环存活 8s 无 panic（eframe wgpu 面 + paint callback + terrain/sprite 双管线多帧执行）。**像素观感本代理会话无法人工确认，需用户 `cargo run -p strata-app` 目测**；拖拽/WASD/滚轮的交互手感同为待用户验证项。
 | C2 UI 对比度 | ⏳ M3 建 | 待定 | 调低 glass tint 必红 |
-| D1 性能回归 | ✅ 建成（本机口径）：`--bench-render` 实测 CPU 核 + GPU 帧管线（每帧 poll(Wait) 真同步）；基线 bench/baseline.env（NOISE 60.7ms / REGEN 19.4ms / FPS 237.3 / P50 4.33ms），余量 CPU+10%、FPS−25%（debug 口径、不含 egui/UI，已登记） | `xtask bench --check`（gate 内自动） | selftest 负对照：CPU 劣化2×/FPS掉40%/RSS超预算 全判红、5%抖动不误红；比较器与实门共用同一 evaluate_against |
+| D1 性能回归 | ✅ 建成（本机口径）：`--bench-render` 实测 CPU 核 + GPU 帧管线（每帧 poll(Wait) 真同步）；基线 bench/baseline.env，余量 CPU+10%、**帧时间 P50/P95 +25%**、FPS−25%（帧时间属 GPU 负载敏感项，实测 debug 面峰峰抖 ~25%，故从 CPU±10% 改归帧时间档；单值改动已披露） | `xtask bench --check`（gate 内自动） | selftest 负对照 6 项：CPU 劣化2×/FPS掉40%/**帧时间劣化2×**/RSS超预算 全判红；**帧时间+15%、CPU+5%** 不误红；比较器与实门共用同一 evaluate_against |
 | D2 内存预算 | ✅ 建成（bench 面）：GetProcessMemoryInfo 峰值 RSS 自报（本机 243MB < 上限 512MB） | 同上（PEAK_RSS_MB_MAX=512） | RSS 项入负对照表；UI 壳层 RSS 属 M3 另建 |
 | E1 变异门 | ⏳ M2 建 | 待定 | 弱化断言必冒新增存活 |
 | F1 三平台矩阵 | ✅ CI 已接（build/test/gate 级）| workflow `gate.yml`（push/PR on master）| 任一平台红 |

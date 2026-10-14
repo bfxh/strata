@@ -13,8 +13,10 @@ use std::process::{exit, Command};
 const CORE_CRATES: &[&str] = &["strata-geo", "strata-exec", "strata-nodes"];
 const BASELINE_PATH: &str = "bench/baseline.env";
 /// 回归余量（06 D1）：CPU 项确定性高=10%；GPU 帧率受背景负载抖动=25%（登记口径）。
+/// P50/P95 帧时间同属 GPU 负载敏感项 ⇒ 用帧时间档（+25%），实测 debug 面峰峰抖 ~25%。
 const CPU_MARGIN: f64 = 1.10;
 const FPS_MARGIN: f64 = 0.75;
+const FRAME_MS_MARGIN: f64 = 1.25;
 
 fn main() {
     let args: Vec<String> = env::args().skip(1).collect();
@@ -264,7 +266,7 @@ fn bench_update() -> Result<(), i32> {
         return Err(101);
     };
     let mut out = String::from(
-        "# D1/D2 基线（debug, min-of-3；余量 CPU±10% / FPS -25%；TARGET 外的平台跑复现性不跑哈希）\n",
+        "# D1/D2 基线（debug, min-of-3；余量 CPU±10% / 帧时间 P50-P95 +25% / FPS -25%；TARGET 外的平台跑复现性不跑哈希）\n",
     );
     out.push_str(&format!("TARGET={platform}\n"));
     for k in [
@@ -292,9 +294,10 @@ fn bench_selftest() -> Result<(), i32> {
     let mut base = HashMap::new();
     base.insert("NOISE_TILE_MS".to_string(), 10.0);
     base.insert("AVG_FPS".to_string(), 60.0);
+    base.insert("P50_MS".to_string(), 4.0);
     base.insert("PEAK_RSS_MB".to_string(), 300.0);
     base.insert("PEAK_RSS_MB_MAX".to_string(), 512.0);
-    let cases: [(&str, HashMap<String, f64>, bool); 4] = [
+    let cases: [(&str, HashMap<String, f64>, bool); 6] = [
         (
             "CPU 劣化 2×",
             HashMap::from([("NOISE_TILE_MS".to_string(), 20.0)]),
@@ -304,6 +307,16 @@ fn bench_selftest() -> Result<(), i32> {
             "FPS 掉到 40%",
             HashMap::from([("AVG_FPS".to_string(), 24.0)]),
             true,
+        ),
+        (
+            "帧时间劣化 2×",
+            HashMap::from([("P50_MS".to_string(), 8.0)]),
+            true,
+        ),
+        (
+            "帧时间 +15% 不误红",
+            HashMap::from([("P50_MS".to_string(), 4.6)]),
+            false,
         ),
         (
             "RSS 超预算",
@@ -333,7 +346,10 @@ fn bench_selftest() -> Result<(), i32> {
         eprintln!("[xtask] ✗ selftest: 基线过不了自己的检查");
         return Err(101);
     }
-    ok("D1/D2 selftest", "四类劣化全判红、正常不误红");
+    ok(
+        "D1/D2 selftest",
+        "6 项负对照：CPU/FPS/帧时间/RSS 劣化必红，帧时间+15%/CPU+5% 不误红",
+    );
     Ok(())
 }
 
@@ -356,6 +372,11 @@ fn evaluate_against(base: &HashMap<String, f64>, got: &HashMap<String, f64>) -> 
                 }
             }
             "PEAK_RSS_MB_MAX" => {}
+            "P50_MS" | "P95_MS" => {
+                if *gv > bv * FRAME_MS_MARGIN {
+                    fails.push(format!("{key} {gv:.3} 超帧时间余量(+25%)"));
+                }
+            }
             _ => {
                 if *gv > bv * CPU_MARGIN {
                     fails.push(format!("{key} {gv:.3} 超余量"));
