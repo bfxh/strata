@@ -8,6 +8,7 @@ members = [
     "crates/strata-io",
     "crates/strata-gpu",
     "crates/strata-render",
+    "crates/strata-ui",
     "crates/strata-app",
     "xtask",
 ]

@@ -2275,6 +2275,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "strata-ui"
+version = "0.0.0"
+
+[[package]]
 name = "strum"
 version = "0.26.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
