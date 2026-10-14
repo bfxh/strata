@@ -39,7 +39,7 @@
 - 撤销/重做栈（DAG 纯数据，03）。
 - **验收**：1024² 区域侵蚀交互式（步进期间不掉出 30fps）；侵蚀语料回归集（Treetop 类基准）进 B1 门。
 
-### 完成状态（截至 M2a，诚实标注）
+### 完成状态（截至 M2 收尾，诚实标注）
 | 项 | 状态 | 证据 |
 |---|---|---|
 | CPU 侵蚀核（热 talus + 水力 Mei）| ✅ | `strata-nodes::erosion` 7 测试全绿，进 `xtask gate` B1 |
@@ -48,6 +48,7 @@
 | 热侵蚀收敛不震荡 | ✅ 判红选定 | 双缓冲并行版过冲振荡被实测否决 ⇒ 改 Gauss-Seidel 就地松弛（凸组合单调）|
 | GPU ping-pong + parity(B2) | ✅ B2 门建成（M2b）| `strata-gpu::parity` + `noise_parity.wgsl` + `hydraulic_parity.wgsl`（device 申请 SHADER_INT64）对拍 CPU：噪声跨后端每格 ≤1 LSB（本机 plain 全 0/warp 2 格；CI macOS plain 1 格——FMA 量化边界，P8 分层登记）；侵蚀核单步 max\|Δ\|=0 三场逐位、多步混沌放大（12 步≈652，门只判单步+GPU 自复现）。恒判 GPU 双跑自复现；负对照 seed+1⇒Δ26922 / k_capacity×2⇒Δ210 判红。 |
 | 1024² 交互式 ≥30fps | ✅ 实测达标 | `--bench-erosion`：1024² 每帧 8 步 GPU 水力侵蚀 **245.9fps**（单步 0.508ms，含 poll(Wait) 真同步，debug 口径）；D1 门入基线 EROSION_FPS/EROSION_STEP_MS（−25%/+25% 余量）+ selftest 两项侵蚀负对照。视口内交互式触发留 M3 接 UI |
+| 撤销/重做栈（DAG 纯数据）| ✅ | `strata-exec::history::History<S>` 快照栈：commit 截断 redo 分支、cap 丢最旧保当前、边界 no-op；6 单测（含 `History<Graph>` 回退旧 DAG）进 B1 |
 
 ## M3 · 双视图 UI —— 简繁同真相
 

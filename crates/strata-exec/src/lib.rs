@@ -8,6 +8,8 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 use strata_geo::TilePos;
 
+pub mod history;
+
 /// 节点的唯一身份（结构变更时稳定，不随插入顺序漂移）。
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct NodeId(pub u32);
