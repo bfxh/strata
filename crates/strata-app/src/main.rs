@@ -127,7 +127,7 @@ impl egui_wgpu::CallbackTrait for TerrainCallback {
         let x = vp.left_px.max(0) as u32;
         let y = vp.top_px.max(0) as u32;
         let w = vp.width_px.max(0) as u32;
-        let h = (vp.from_bottom_px - vp.top_px).max(0) as u32;
+        let h = vp.height_px.max(0) as u32;
         if let Ok(guard) = self.shared.gpu.lock() {
             guard.paint(rpass, x, y, w, h);
         }
