@@ -22,6 +22,9 @@
 const DX: [i32; 4] = [1, -1, 0, 0];
 const DY: [i32; 4] = [0, 0, 1, -1];
 
+/// 反向邻接方向：邻居 nb 在方向 k，nb 朝本格流来的那条出流方向 = FLIP[k]（E↔W, N↔S）。
+const FLIP: [usize; 4] = [1, 0, 3, 2];
+
 #[inline]
 fn idx(x: usize, y: usize, n: usize) -> usize {
     y * n + x
@@ -141,26 +144,29 @@ impl Hydraulic {
 
     /// 单步：水从高水头往低水头搬运（携沉积），按容量溶蚀/沉积，再降雨/蒸发。
     /// 返回是否发生了任何流动（全平且无水时 false，供调用方早停）。
+    ///
+    /// **序无关（GPU 前置）**：每格的 `new_water/new_sed/out_water` 都由「按固定
+    /// [E,W,N,S] 顺序求 inflow 总和与 outflow 总和 ⇒ 一次加减」得到，与外层行主序
+    /// 无关。f32 加法不满足交换律，跨格累加会让 GPU 无法逐位镜像；此处把顺序约束
+    /// 收敛到每格自身 4 项内部，才能被 compute shader 1:1 直译（M2b-乙 parity 前置）。
     pub fn step(&mut self, p: &HydraulicParams) -> bool {
         let n = self.n;
         let len = n * n;
-        let mut new_water = self.water.clone();
-        let mut new_sed = self.sediment.clone();
-        let mut new_h = self.h.clone();
-        let mut out_water = vec![0.0f32; len]; // 出流量（供容量用）
 
+        // 阶段 1：每格算 4 向流出水量 flow_w[c][k] 与流出沉积 flow_s[c][k]
+        // （只用旧态；carry 用 `sediment * frac` 原式，避免后续从 flow/water 反解）。
+        let mut flow_w: Vec<[f32; 4]> = vec![[0.0f32; 4]; len];
+        let mut flow_s: Vec<[f32; 4]> = vec![[0.0f32; 4]; len];
         let mut any_flow = false;
         for y in 0..n {
             for x in 0..n {
                 let c = idx(x, y, n);
-                let head_c = self.h[c] + self.water[c];
                 if self.water[c] <= p.min_water {
                     continue;
                 }
-                // 先求总正水头差
+                let head_c = self.h[c] + self.water[c];
                 let mut total_drop = 0.0f32;
                 let mut drops = [0.0f32; 4];
-                let mut nbs = [usize::MAX; 4];
                 for k in 0..4 {
                     let nx = x as i32 + DX[k];
                     let ny = y as i32 + DY[k];
@@ -168,7 +174,6 @@ impl Hydraulic {
                         continue;
                     }
                     let nb = idx(nx as usize, ny as usize, n);
-                    nbs[k] = nb;
                     let d = (head_c - (self.h[nb] + self.water[nb])).max(0.0);
                     drops[k] = d;
                     total_drop += d;
@@ -177,26 +182,46 @@ impl Hydraulic {
                     continue;
                 }
                 any_flow = true;
-                let w_out = self.water[c]; // 按水头差比例分配全部可流出水
+                let w_out = self.water[c];
+                let s_out = self.sediment[c];
                 for k in 0..4 {
-                    let nb = nbs[k];
-                    if nb == usize::MAX {
-                        continue;
-                    }
                     let frac = drops[k] / total_drop;
-                    let flow = w_out * frac;
-                    if flow <= 0.0 {
+                    flow_w[c][k] = w_out * frac;
+                    flow_s[c][k] = s_out * frac;
+                }
+            }
+        }
+
+        // 阶段 2：每格按固定 [E,W,N,S] 顺序求 outflow / inflow 总和 ⇒ 一次加减得新态。
+        // flip(k) = 邻居 k 方向上「向我流来」对应的那条出流方向（E↔W, N↔S）。
+        let mut new_water = vec![0.0f32; len];
+        let mut new_sed = vec![0.0f32; len];
+        let mut out_water = vec![0.0f32; len];
+        let mut new_h = self.h.clone();
+        for y in 0..n {
+            for x in 0..n {
+                let c = idx(x, y, n);
+                let mut w_out_sum = 0.0f32;
+                let mut s_out_sum = 0.0f32;
+                for k in 0..4 {
+                    w_out_sum += flow_w[c][k];
+                    s_out_sum += flow_s[c][k];
+                }
+                out_water[c] = w_out_sum;
+                let mut w_in_sum = 0.0f32;
+                let mut s_in_sum = 0.0f32;
+                for k in 0..4 {
+                    let nx = x as i32 + DX[k];
+                    let ny = y as i32 + DY[k];
+                    if nx < 0 || ny < 0 || nx as usize >= n || ny as usize >= n {
                         continue;
                     }
-                    // 搬运水量（源池在 new_water 里扣，注入累加到缓冲）
-                    new_water[c] -= flow;
-                    new_water[nb] += flow;
-                    out_water[c] += flow;
-                    // 携带沉积：按流出水占总水的比例带走同比例沉积
-                    let carry = self.sediment[c] * frac;
-                    new_sed[c] -= carry;
-                    new_sed[nb] += carry;
+                    let nb = idx(nx as usize, ny as usize, n);
+                    w_in_sum += flow_w[nb][FLIP[k]];
+                    s_in_sum += flow_s[nb][FLIP[k]];
                 }
+                new_water[c] = self.water[c] - w_out_sum + w_in_sum;
+                new_sed[c] = self.sediment[c] - s_out_sum + s_in_sum;
             }
         }
 
