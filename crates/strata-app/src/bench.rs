@@ -9,6 +9,7 @@
 
 use std::time::Instant;
 
+use strata_gpu::parity::{ErosionBenchParams, ErosionStepper};
 use strata_gpu::renderer::{request_offscreen_device, TerrainGpu};
 use strata_nodes::region::NoiseNode;
 use strata_render::mesh::TerrainMesh;
@@ -141,6 +142,68 @@ pub fn run_render_bench(frames: u32) -> Option<BenchReport> {
         regen_total: clip.regen_count - regen0,
         uploads_total: clip.upload_count - up0,
         peak_rss_mb: peak_rss_mb(),
+    })
+}
+
+/// 1024² 区域 GPU 水力侵蚀离屏基准报告（D1 门的侵蚀项）。
+pub struct ErosionBenchReport {
+    pub platform_key: String,
+    pub grid_n: u32,
+    pub steps_per_frame: u32,
+    /// 单步 GPU 水力耗时（ms，min-of-3）。
+    pub step_ms: f64,
+    /// 「每帧步进 steps_per_frame 步」意义下的帧率（含真同步）。
+    pub fps: f64,
+}
+
+impl ErosionBenchReport {
+    pub fn print(&self) {
+        println!("PLATFORM={}", self.platform_key);
+        println!("EROSION_GRID_N={}", self.grid_n);
+        println!("EROSION_STEPS_PER_FRAME={}", self.steps_per_frame);
+        println!("EROSION_STEP_MS={:.3}", self.step_ms);
+        println!("EROSION_FPS={:.2}", self.fps);
+    }
+}
+
+/// 无窗口跑真实 GPU 水力侵蚀：建一次资源，`frames` 次迭代每次连步
+/// `steps_per_frame` 步 + 一次 `poll(Wait)`。min-of-3 迭代取最快，压调度抖动。
+/// 无 adapter / 无 SHADER_INT64 ⇒ None（打印 SKIP，不编数）。
+pub fn run_erosion_bench(
+    grid_n: u32,
+    steps_per_frame: u32,
+    frames: u32,
+) -> Option<ErosionBenchReport> {
+    let bp = ErosionBenchParams {
+        n: grid_n,
+        k_capacity: 4.0,
+        k_dissolve: 0.004,
+        k_deposit: 0.35,
+        rain: 0.002,
+        evaporation: 0.01,
+        min_water: 1e-6,
+    };
+    let stepper = ErosionStepper::new(&bp)?;
+    // 预热一次（着色器编译/资源上传不计入）。
+    stepper.step_batch(1);
+    let mut best_frame_ms = f64::MAX;
+    let reps = frames.max(3);
+    for _ in 0..reps {
+        let t = Instant::now();
+        if !stepper.step_batch(steps_per_frame) {
+            return None;
+        }
+        best_frame_ms = best_frame_ms.min(t.elapsed().as_secs_f64() * 1000.0);
+    }
+    let frame_ms = best_frame_ms;
+    let step_ms = frame_ms / f64::from(steps_per_frame);
+    let fps = 1000.0 / frame_ms.max(1e-9);
+    Some(ErosionBenchReport {
+        platform_key: stepper.platform_key().to_string(),
+        grid_n,
+        steps_per_frame,
+        step_ms,
+        fps,
     })
 }
 

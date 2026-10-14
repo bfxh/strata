@@ -48,6 +48,28 @@ fn main() -> eframe::Result<()> {
             }
         };
     }
+    if args.iter().any(|a| a == "--bench-erosion") {
+        let num = |flag: &str, dflt: u32| -> u32 {
+            args.iter()
+                .position(|a| a == flag)
+                .and_then(|i| args.get(i + 1))
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(dflt)
+        };
+        let grid_n = num("--grid", 1024);
+        let spf = num("--steps-per-frame", 8);
+        let frames = num("--frames", 60);
+        return match strata_app::bench::run_erosion_bench(grid_n, spf, frames) {
+            Some(rep) => {
+                rep.print();
+                Ok(())
+            }
+            None => {
+                println!("EROSION BENCH SKIP: 本机无可用 GPU adapter 或无 SHADER_INT64");
+                std::process::exit(2);
+            }
+        };
+    }
     if let Some(path) = args
         .iter()
         .position(|a| a == "--generate")

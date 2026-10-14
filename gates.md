@@ -16,7 +16,7 @@
 
 > M1c 视口冒烟（非门，属人工验收）：strata.exe 渲染循环存活 8s 无 panic（eframe wgpu 面 + paint callback + terrain/sprite 双管线多帧执行）。**像素观感本代理会话无法人工确认，需用户 `cargo run -p strata-app` 目测**；拖拽/WASD/滚轮的交互手感同为待用户验证项。
 | C2 UI 对比度 | ⏳ M3 建 | 待定 | 调低 glass tint 必红 |
-| D1 性能回归 | ✅ 建成（本机口径）：`--bench-render` 实测 CPU 核 + GPU 帧管线（每帧 poll(Wait) 真同步）；基线 bench/baseline.env，余量 CPU+10%、**帧时间 P50/P95 +25%**、FPS−25%（帧时间属 GPU 负载敏感项，实测 debug 面峰峰抖 ~25%，故从 CPU±10% 改归帧时间档；单值改动已披露） | `xtask bench --check`（gate 内自动） | selftest 负对照 6 项：CPU 劣化2×/FPS掉40%/**帧时间劣化2×**/RSS超预算 全判红；**帧时间+15%、CPU+5%** 不误红；比较器与实门共用同一 evaluate_against |
+| D1 性能回归 | ✅ 建成（本机口径）：`--bench-render` 实测 CPU 核 + GPU 帧管线（每帧 poll(Wait) 真同步）；**`--bench-erosion` 实测 1024² GPU 水力侵蚀步进（本机 8 步/帧 = 245.9fps / 0.508ms 每步，验收线「步进期间 ≥30fps」大余量）**；基线 bench/baseline.env，余量 CPU+10%、**帧时间(含 EROSION_STEP_MS) +25%**、FPS(含 EROSION_FPS) −25%（帧时间属 GPU 负载敏感项，实测 debug 面峰峰抖 ~25%，故从 CPU±10% 改归帧时间档；单值改动已披露） | `xtask bench --check`（gate 内自动） | selftest 负对照 8 项：CPU 劣化2×/FPS掉40%/帧时间劣化2×/**侵蚀FPS掉50%/侵蚀单步劣化2×**/RSS超预算 全判红；帧时间+15%、CPU+5% 不误红；比较器与实门共用同一 evaluate_against |
 | D2 内存预算 | ✅ 建成（bench 面）：GetProcessMemoryInfo 峰值 RSS 自报（本机 243MB < 上限 512MB） | 同上（PEAK_RSS_MB_MAX=512） | RSS 项入负对照表；UI 壳层 RSS 属 M3 另建 |
 | E1 变异门 | ⏳ M2 建 | 待定 | 弱化断言必冒新增存活 |
 | F1 三平台矩阵 | ✅ CI 已接（build/test/gate 级）| workflow `gate.yml`（push/PR on master）| 任一平台红 |

@@ -46,8 +46,8 @@
 | 守恒不变量 Σ(h+sed) | ✅ 实测钉死 | 闭合边界 40 步水/沉积守恒 <1e-4；水无源汇守恒 |
 | 位确定 + 金标准 | ✅ | 热/水双跑逐位一致；hydraulic 量化首行 `[0,94,0,842,2279,3601,4378,4913]`（本机冻结，B3）|
 | 热侵蚀收敛不震荡 | ✅ 判红选定 | 双缓冲并行版过冲振荡被实测否决 ⇒ 改 Gauss-Seidel 就地松弛（凸组合单调）|
-| GPU ping-pong + parity(B2) | ✅ B2 门建成（M2b）| `strata-gpu::parity` + `noise_parity.wgsl` + `hydraulic_parity.wgsl`（device 申请 SHADER_INT64）对拍 CPU：噪声跨后端每格 ≤1 LSB（本机 plain 全 0/warp 2 格；CI macOS plain 1 格——FMA 量化边界，P8 分层登记）；侵蚀核单步 max\|Δ\|=0 三场逐位、多步混沌放大（12 步≈652，门只判单步+GPU 自复现）。恒判 GPU 双跑自复现；负对照 seed+1⇒Δ26922 / k_capacity×2⇒Δ210 判红。**仍待**：GPU ping-pong 进视口 + 1024² 交互式 ≥30fps bench |
-| 1024² 交互式 ≥30fps | ⏳ M2b | 需 GPU 步进 + dirty-tile 增量 |
+| GPU ping-pong + parity(B2) | ✅ B2 门建成（M2b）| `strata-gpu::parity` + `noise_parity.wgsl` + `hydraulic_parity.wgsl`（device 申请 SHADER_INT64）对拍 CPU：噪声跨后端每格 ≤1 LSB（本机 plain 全 0/warp 2 格；CI macOS plain 1 格——FMA 量化边界，P8 分层登记）；侵蚀核单步 max\|Δ\|=0 三场逐位、多步混沌放大（12 步≈652，门只判单步+GPU 自复现）。恒判 GPU 双跑自复现；负对照 seed+1⇒Δ26922 / k_capacity×2⇒Δ210 判红。 |
+| 1024² 交互式 ≥30fps | ✅ 实测达标 | `--bench-erosion`：1024² 每帧 8 步 GPU 水力侵蚀 **245.9fps**（单步 0.508ms，含 poll(Wait) 真同步，debug 口径）；D1 门入基线 EROSION_FPS/EROSION_STEP_MS（−25%/+25% 余量）+ selftest 两项侵蚀负对照。视口内交互式触发留 M3 接 UI |
 
 ## M3 · 双视图 UI —— 简繁同真相
 

@@ -206,6 +206,56 @@ fn run_bench_bin() -> Result<Option<BenchOutcome>, i32> {
         .find_map(|l| l.strip_prefix("PLATFORM="))
         .unwrap_or("unknown")
         .to_string();
+    let mut metrics = parse_kv(&text);
+    // 并一次 1024² GPU 水力侵蚀 bench（1024²、每帧 8 步）；SKIP 则不并（基线缺项不判）。
+    if let Some((ero, _)) = run_erosion_bench_bin()? {
+        for (k, v) in ero {
+            metrics.insert(k, v);
+        }
+    }
+    Ok(Some((metrics, platform)))
+}
+
+/// 跑一次侵蚀 bench：返回（指标, 平台键）；无 GPU / 无 SHADER_INT64 ⇒ None。
+fn run_erosion_bench_bin() -> Result<Option<BenchOutcome>, i32> {
+    let out = Command::new(cargo_bin())
+        .args([
+            "run",
+            "-q",
+            "-j",
+            "1",
+            "-p",
+            "strata-app",
+            "--bin",
+            "strata",
+            "--",
+            "--bench-erosion",
+            "--grid",
+            "1024",
+            "--steps-per-frame",
+            "8",
+            "--frames",
+            "60",
+        ])
+        .output()
+        .map_err(|_| 101)?;
+    let text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    if out.status.code() == Some(2) || text.contains("EROSION BENCH SKIP") {
+        return Ok(None);
+    }
+    if !out.status.success() {
+        eprintln!("{text}");
+        return Err(out.status.code().unwrap_or(101));
+    }
+    let platform = text
+        .lines()
+        .find_map(|l| l.strip_prefix("PLATFORM="))
+        .unwrap_or("unknown")
+        .to_string();
     Ok(Some((parse_kv(&text), platform)))
 }
 
@@ -266,7 +316,7 @@ fn bench_update() -> Result<(), i32> {
         return Err(101);
     };
     let mut out = String::from(
-        "# D1/D2 基线（debug, min-of-3；余量 CPU±10% / 帧时间 P50-P95 +25% / FPS -25%；TARGET 外的平台跑复现性不跑哈希）\n",
+        "# D1/D2 基线（debug, min-of-3；余量 CPU±10% / 帧时间(含 EROSION_STEP_MS) +25% / FPS(含 EROSION_FPS) -25%；TARGET 外的平台跑复现性不跑哈希）\n",
     );
     out.push_str(&format!("TARGET={platform}\n"));
     for k in [
@@ -275,6 +325,8 @@ fn bench_update() -> Result<(), i32> {
         "AVG_FPS",
         "P50_MS",
         "P95_MS",
+        "EROSION_STEP_MS",
+        "EROSION_FPS",
         "PEAK_RSS_MB",
     ] {
         if let Some(v) = got.get(k) {
@@ -295,9 +347,11 @@ fn bench_selftest() -> Result<(), i32> {
     base.insert("NOISE_TILE_MS".to_string(), 10.0);
     base.insert("AVG_FPS".to_string(), 60.0);
     base.insert("P50_MS".to_string(), 4.0);
+    base.insert("EROSION_FPS".to_string(), 200.0);
+    base.insert("EROSION_STEP_MS".to_string(), 0.5);
     base.insert("PEAK_RSS_MB".to_string(), 300.0);
     base.insert("PEAK_RSS_MB_MAX".to_string(), 512.0);
-    let cases: [(&str, HashMap<String, f64>, bool); 6] = [
+    let cases: [(&str, HashMap<String, f64>, bool); 8] = [
         (
             "CPU 劣化 2×",
             HashMap::from([("NOISE_TILE_MS".to_string(), 20.0)]),
@@ -317,6 +371,16 @@ fn bench_selftest() -> Result<(), i32> {
             "帧时间 +15% 不误红",
             HashMap::from([("P50_MS".to_string(), 4.6)]),
             false,
+        ),
+        (
+            "侵蚀 FPS 掉到 50%",
+            HashMap::from([("EROSION_FPS".to_string(), 100.0)]),
+            true,
+        ),
+        (
+            "侵蚀单步劣化 2×",
+            HashMap::from([("EROSION_STEP_MS".to_string(), 1.0)]),
+            true,
         ),
         (
             "RSS 超预算",
@@ -348,7 +412,7 @@ fn bench_selftest() -> Result<(), i32> {
     }
     ok(
         "D1/D2 selftest",
-        "6 项负对照：CPU/FPS/帧时间/RSS 劣化必红，帧时间+15%/CPU+5% 不误红",
+        "8 项负对照：CPU/FPS/帧时间/侵蚀FPS/侵蚀步时/RSS 劣化必红，帧时间+15%/CPU+5% 不误红",
     );
     Ok(())
 }
@@ -359,7 +423,7 @@ fn evaluate_against(base: &HashMap<String, f64>, got: &HashMap<String, f64>) -> 
     for (key, bv) in base {
         let Some(gv) = got.get(key) else { continue };
         match key.as_str() {
-            "AVG_FPS" => {
+            "AVG_FPS" | "EROSION_FPS" => {
                 if *gv < bv * FPS_MARGIN {
                     fails.push(format!("{key} {gv:.2} 低于下限"));
                 }
@@ -372,7 +436,7 @@ fn evaluate_against(base: &HashMap<String, f64>, got: &HashMap<String, f64>) -> 
                 }
             }
             "PEAK_RSS_MB_MAX" => {}
-            "P50_MS" | "P95_MS" => {
+            "P50_MS" | "P95_MS" | "EROSION_STEP_MS" => {
                 if *gv > bv * FRAME_MS_MARGIN {
                     fails.push(format!("{key} {gv:.3} 超帧时间余量(+25%)"));
                 }
