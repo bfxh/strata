@@ -77,10 +77,66 @@ fn gate() -> Result<(), i32> {
     )?;
     // B1 test
     run("B1 test", &["test", "--workspace"], &[])?;
+    // C2 对比度（数据层）：独立判定项，fail-closed（断言失踪即红，不因过滤零匹配假绿）
+    c2_gate()?;
     // D1/D2：判红能力自检（无需 GPU）→ 实测对照基线（有 GPU 才有效判红；无 GPU 如实 SKIP 披露）
     bench_selftest()?;
     bench_check(false)?;
     ok("gate", "全部门禁绿");
+    Ok(())
+}
+
+/// C2 对比度数据层断言的最低数量（少于则视为测试失踪 ⇒ 红，非绿）。
+/// 现 strata-ui 有 contrast 4 + tokens 4 = 8 条；只增不减。
+const C2_MIN_PASSED: u64 = 8;
+
+/// 解析 `test result: ... N passed; M failed;` 里紧邻关键字前的整数。
+fn result_count(line: &str, word: &str) -> Option<u64> {
+    let toks: Vec<&str> = line.split_whitespace().collect();
+    let i = toks.iter().position(|t| t.starts_with(word))?;
+    if i == 0 {
+        return None;
+    }
+    toks[i - 1].parse::<u64>().ok()
+}
+
+/// C2 判定项：跑 strata-ui 测试，failed>0 或 passed<C2_MIN_PASSED（断言失踪）⇒ 红。
+fn c2_gate() -> Result<(), i32> {
+    println!("\n[xtask] == C2 对比度(数据) ==");
+    let out = Command::new(cargo_bin())
+        .args(["test", "-j", "1", "-p", "strata-ui", "--lib"])
+        .output()
+        .map_err(|_| 101)?;
+    let text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let mut passed = 0u64;
+    let mut failed = 0u64;
+    let mut saw_result = false;
+    for line in text.lines() {
+        if let Some(rest) = line.trim().strip_prefix("test result:") {
+            saw_result = true;
+            passed += result_count(rest, "passed").unwrap_or(0);
+            failed += result_count(rest, "failed").unwrap_or(0);
+        }
+    }
+    if !out.status.success() || failed > 0 {
+        eprintln!("{text}");
+        eprintln!("[xtask] ✗ C2 对比度(数据): 判红（failed={failed}）");
+        return Err(101);
+    }
+    if !saw_result || passed < C2_MIN_PASSED {
+        eprintln!(
+            "[xtask] ✗ C2 对比度(数据): 断言失踪（passed={passed} < 期望 {C2_MIN_PASSED}）—— 测试没跑到，判红不判绿"
+        );
+        return Err(101);
+    }
+    ok(
+        "C2 对比度(数据)",
+        &format!("AA body ≥4.5 最坏底判据，{passed} 条断言全过（含负对照压 alpha 必红）"),
+    );
     Ok(())
 }
 
