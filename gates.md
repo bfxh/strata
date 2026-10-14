@@ -22,6 +22,8 @@
 | F1 三平台矩阵 | ✅ CI 已接（build/test/gate 级）| workflow `gate.yml`（push/PR on master）| 任一平台红 |
 
 ## CI/CD 现状与债务（GitHub Actions @ bfxh/strata，private）
+- **首次全绿已达成**（run 38499370906，2026-10-14，3m37s）：deps + windows/ubuntu/macos 四 job 全 success。
+- 首轮 ubuntu 判红为真缺陷（eframe 关 default-features 后 Linux 需显式 x11/wayland），修复 `c477b19` 实证——三平台矩阵不是装饰。
 - 三平台矩阵跑 `cargo xtask gate` 全链 = 本地同一入口；deps job 单独钉 `--locked` 一致性。
 - **无登记 GPU 的 runner 上的行为（设计而非缺陷）**：C1 哈希项与 D1/D2 数值项按 TARGET 平台键 SKIP 并在日志披露；**恒判项**=双跑复现性、非空图、selftest 负对照、fmt/clippy/build/test 全家。
 - 债务（M2 接入，首版不发防假红掩盖真红）：① 跨平台 golden/bench 分文件基线登记；② cargo-deny（audit/licenses）；③ 覆盖率下限 tarpaulin；④ release 流水线（tag→三平台产物→canary）。
